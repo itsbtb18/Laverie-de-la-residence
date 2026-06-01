@@ -67,7 +67,23 @@ export const appResources = {
         validationError: "Les informations saisies ne sont pas valides.",
         notFound: "Élément introuvable.",
         permissionDenied: "Vous n'avez pas l'autorisation pour cette action.",
+        qrScanNotDetected:
+          "QR code illisible. Utilisez la caméra en direct, rapprochez-vous, évitez les photos d'écran et assurez un bon éclairage.",
+        qrCameraUnavailable:
+          "Caméra indisponible. Autorisez l'accès dans le navigateur ou choisissez une image.",
       },
+      qrScanDefaultInstruction:
+        "Cadrez le QR code du ticket dans la zone de lecture.",
+      qrScanTipCamera:
+        "Privilégiez la caméra en direct (bouton « Caméra »).",
+      qrScanTipNoScreenPhoto:
+        "Évitez de photographier un écran : flou et rayures empêchent la lecture.",
+      qrScanTipLighting:
+        "Tenez l'appareil stable, sans reflet, avec le QR bien éclairé.",
+      qrScanModeCamera: "Caméra",
+      qrScanModeFile: "Image",
+      qrScanChooseImage: "Choisir une photo du ticket",
+      qrScanStartingCamera: "Démarrage de la caméra…",
       phoneNumber: "Numéro de téléphone",
       phonePlaceholder: "05XXXXXXXX",
       secretCode: "Code secret",
@@ -371,7 +387,19 @@ export const appResources = {
         validationError: "المعلومات المدخلة غير صالحة.",
         notFound: "العنصر غير موجود.",
         permissionDenied: "ليس لديك صلاحية لهذا الإجراء.",
+        qrScanNotDetected:
+          "تعذر قراءة الرمز. استخدم الكاميرا مباشرة، قرّب الجهاز، وتجنب تصوير الشاشة مع إضاءة جيدة.",
+        qrCameraUnavailable:
+          "الكاميرا غير متاحة. اسمح بالوصول من المتصفح أو اختر صورة.",
       },
+      qrScanDefaultInstruction: "ضع رمز QR للتذكرة داخل منطقة المسح.",
+      qrScanTipCamera: "يفضّل استخدام الكاميرا مباشرة (زر « كاميرا »).",
+      qrScanTipNoScreenPhoto: "تجنب تصوير الشاشة: الضبابية تمنع القراءة.",
+      qrScanTipLighting: "ثبّت الجهاز بدون انعكاس وبإضاءة كافية.",
+      qrScanModeCamera: "كاميرا",
+      qrScanModeFile: "صورة",
+      qrScanChooseImage: "اختيار صورة للتذكرة",
+      qrScanStartingCamera: "جاري تشغيل الكاميرا…",
       phoneNumber: "رقم الهاتف",
       phonePlaceholder: "05XXXXXXXX",
       secretCode: "الرمز السري",

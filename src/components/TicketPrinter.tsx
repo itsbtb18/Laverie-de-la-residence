@@ -81,7 +81,7 @@ export function TicketPrinter({
 
           <div className="border-t border-dashed border-slate-300 py-3 text-center">
             <div className="mt-3 flex justify-center">
-              <QRCodeSVG value={receipt.qrText} size={116} includeMargin level="M" />
+              <QRCodeSVG value={receipt.qrText} size={140} includeMargin level="H" />
             </div>
             <p className="mt-2 text-xs font-semibold text-slate-700">{t("ticketQrHint")}</p>
           </div>
