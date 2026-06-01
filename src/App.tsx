@@ -42,12 +42,14 @@ export default function App() {
   const language = selectedLanguage ?? "fr";
   const session = getAuthSession();
 
-  const loginRedirectTarget = session
+  const customerRedirectTarget = session && session.role === "CUSTOMER" ? "/appointments" : null;
+
+  const staffRedirectTarget = session
     ? session.role === "ADMIN"
-      ? "/admin/dashboard/calendar"
+      ? "/admin/dashboard/creation"
       : session.role === "SUPER_ADMIN"
         ? "/superadmin/dashboard"
-        : "/appointments"
+        : null
     : null;
 
   return (
@@ -70,8 +72,8 @@ export default function App() {
         <Route
           path="/login"
           element={
-            loginRedirectTarget
-              ? <Navigate to={loginRedirectTarget} replace />
+            customerRedirectTarget
+              ? <Navigate to={customerRedirectTarget} replace />
               : <UserLogin
                   language={language}
                   onChangeLanguage={setSelectedLanguage}
@@ -82,10 +84,12 @@ export default function App() {
         <Route
           path="/staff/login"
           element={
-            <StaffLogin
-              language={language}
-              onChangeLanguage={setSelectedLanguage}
-            />
+            staffRedirectTarget
+              ? <Navigate to={staffRedirectTarget} replace />
+              : <StaffLogin
+                  language={language}
+                  onChangeLanguage={setSelectedLanguage}
+                />
           }
         />
 
@@ -98,7 +102,7 @@ export default function App() {
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={["ADMIN"]} redirectTo="/staff/login" />}>
-          <Route path="/admin/dashboard" element={<Navigate to="/admin/dashboard/calendar" replace />} />
+          <Route path="/admin/dashboard" element={<Navigate to="/admin/dashboard/creation" replace />} />
           <Route path="/admin/dashboard/customers/:customerId" element={<AdminCustomerDetailPage language={language} />} />
           <Route path="/admin/dashboard/customers/:customerId/ticket" element={<AdminAssistantPage establishmentName="Laverie de la residence" />} />
           <Route path="/admin/dashboard/*" element={<AdminDashboardPage language={language} />} />

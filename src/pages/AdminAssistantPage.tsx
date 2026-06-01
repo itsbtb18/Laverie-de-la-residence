@@ -710,6 +710,7 @@ export function AdminAssistantPage({
                 if (Array.isArray(users) && users.length > 0) {
                   const existing = users[0];
                   const ticketPath = existing.ticket_url || `/admin/dashboard/customers/${existing.id}/ticket`;
+                  console.log("the ticket path : ", ticketPath);
                   console.log("Existing user found, redirecting to ticket:", existing);
                   showSuccess("Un compte existe déjà pour ce numéro — redirection...");
                   try {
@@ -729,7 +730,7 @@ export function AdminAssistantPage({
           console.error("Failed to parse error response", parseErr);
         }
         showError(errMsg);
-        return;
+        throw new Error(errMsg);
       }
 
       console.log("Create response status:", res.status, res.statusText, "ok=", res.ok);
@@ -752,7 +753,7 @@ export function AdminAssistantPage({
       if (!created || typeof created.id === "undefined") {
         console.error("Invalid created response:", created);
         showError("Réponse invalide du serveur. Voir la console.");
-        return;
+        throw new Error("Réponse invalide du serveur");
       }
 
       const ticketUrlFromApi = (created && created.ticket_url) || `/admin/dashboard/customers/${created.id}/ticket`;
@@ -767,11 +768,11 @@ export function AdminAssistantPage({
         clientFirstName: created.first_name,
         clientLastName: created.last_name,
         clientPhone: created.phone,
-        secretCode: created.secret_code,
+        secretCode: payload.secretCode,
         totalPrice: "0",
         paymentStatus: "NOT_APPLICABLE",
         paymentStatusLabel: "",
-        qrText: `${window.location.origin}${ticketUrlFromApi.replace(/\/ticket$/, "")}`,
+        qrText: `LOGIN:${created.phone}:${payload.secretCode}`,
         createdAt: new Date().toISOString(),
       };
 
@@ -781,15 +782,13 @@ export function AdminAssistantPage({
         console.warn("Failed to persist creation ticket in sessionStorage:", storageErr);
       }
 
-      setTicketPreview(receipt);
-      setCreationStep("ticket");
-
-      // Stay on the same page and swap the creation form for the ticket view.
-      showSuccess("Client créé. Ticket prêt à imprimer.");
-      triggerRefresh();
+      // Redirect to the ticket page
+      showSuccess("Client créé. Redirection vers le ticket...");
+      navigate(ticketUrlFromApi, { state: { receipt } });
     } catch (err) {
       console.error("Unexpected error during client creation:", err);
       showError("Erreur lors de la création du client. Voir la console pour détails.");
+      throw err;
     }
   };
 
@@ -817,6 +816,8 @@ export function AdminAssistantPage({
       setCreateFirstName("");
       setCreatePhone("");
       setCreateSecretCode("");
+    } catch (err) {
+      console.warn("Client creation failed, keeping form values:", err);
     } finally {
       setCreatingAccount(false);
     }
@@ -1135,24 +1136,255 @@ export function AdminAssistantPage({
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" /></svg>
         </button>
 
-        <div className="p-3 sm:p-4 lg:p-6" />
+        {/* Notification Banners - always visible with fixed positioning */}
+        {(successMsg || errorMsg) && (
+          <div className="fixed top-4 right-4 z-50 max-w-sm animate-fade-in-up">
+            {successMsg && (
+              <div className="rounded-2xl bg-emerald-500 px-5 py-3 text-white text-sm font-bold shadow-[0_12px_40px_rgba(16,185,129,0.3)] flex items-center gap-2 backdrop-blur-xl">
+                <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                {successMsg}
+              </div>
+            )}
+            {errorMsg && (
+              <div className="rounded-2xl bg-rose-500 px-5 py-3 text-white text-sm font-bold shadow-[0_12px_40px_rgba(225,29,72,0.3)] flex items-center gap-2 backdrop-blur-xl">
+                <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" /></svg>
+                {errorMsg}
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Content Area */}
-        <div className="space-y-6 px-3 pb-4 sm:px-4 lg:px-6 lg:pb-6">
-          {/* ── Notification Banner ── */}
-          {successMsg && (
-            <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 text-emerald-800 text-sm font-semibold flex items-center gap-2 shadow-sm">
-              ✅ {successMsg}
-            </div>
-          )}
-          {errorMsg && (
-            <div className="rounded-xl bg-rose-50 border border-rose-100 p-4 text-rose-800 text-sm font-semibold flex items-center gap-2 shadow-sm">
-              ⚠️ {errorMsg}
-            </div>
-          )}
+        {/* Content Area - creation tab is full-bleed, other tabs keep padding */}
+        {activeTab === "creation" ? (
+          <div className="h-full animate-fade-in-up">
+        {/* 2. CREATION TAB — full-bleed premium layout */}
+        {activeTab === "creation" && (
+          <div className="flex h-full min-h-screen flex-col lg:flex-row">
+            {/* ── Left Panel: Search ── */}
+            <div className="relative flex flex-col border-b border-slate-100/60 bg-white lg:w-[420px] lg:shrink-0 lg:border-b-0 lg:border-r">
+              {/* Decorative blobs */}
+              <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div className="absolute -left-20 -top-20 h-56 w-56 rounded-full bg-sky-100/40 blur-3xl animate-float" />
+                <div className="absolute -right-10 bottom-10 h-40 w-40 rounded-full bg-cyan-100/30 blur-3xl animate-float delay-300" />
+              </div>
 
-          {/* ── Main Tab Contents ── */}
-          <div className="glass-card p-6 sm:p-8 animate-fade-in-up">
+              <div className="relative flex flex-col gap-5 p-6 lg:p-8 animate-fade-in-up">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.25em] text-white shadow-lg">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    Recherche
+                  </div>
+                  <h2 className="mt-4 text-2xl font-black tracking-tight text-slate-900 lg:text-3xl">
+                    Trouver un client
+                  </h2>
+                  <p className="mt-1.5 text-sm text-slate-500 leading-relaxed">
+                    Cherchez par nom, prénom ou téléphone.
+                  </p>
+                </div>
+
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
+                    <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                  </div>
+                  <input
+                    type="text"
+                    value={searchClientQuery}
+                    onChange={(e) => setSearchClientQuery(e.target.value)}
+                    placeholder={t("searchClients")}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 py-4 pl-12 pr-14 text-sm font-medium outline-none transition-all duration-300 placeholder:text-slate-400 focus:border-sky-400 focus:bg-white focus:shadow-[0_0_0_4px_rgba(14,165,233,0.1)]"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Scanner QR"
+                    className="absolute right-2 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl bg-slate-900 text-white shadow-lg transition-all duration-200 hover:scale-105 hover:bg-slate-800 active:scale-95"
+                  >
+                    <svg className="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h6M4 4v6M20 4h-6M20 4v6M4 20h6M4 20v-6M20 20h-6m6 0v-6" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Search results */}
+              <div className="relative flex-1 overflow-y-auto px-6 pb-6 lg:px-8 lg:pb-8">
+                {searchClientQuery.trim() ? (
+                  loadingClients ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="h-8 w-8 rounded-full border-[3px] border-slate-200 border-t-sky-500 animate-spin" />
+                    </div>
+                  ) : clients.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center animate-fade-in-up">
+                      <div className="h-16 w-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                        <svg className="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 3a4 4 0 100 8 4 4 0 000-8z" /></svg>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-500">{t("noClientsFound")}</p>
+                      <p className="mt-1 text-xs text-slate-400">Créez un nouveau compte ci-contre →</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 animate-fade-in-up">
+                      {clients.map((client, idx) => (
+                        <button
+                          key={client.id}
+                          type="button"
+                          onClick={() => navigate(`/admin/dashboard/customers/${client.id}`)}
+                          style={{ animationDelay: `${idx * 60}ms` }}
+                          className="group flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3.5 text-left transition-all duration-200 hover:border-sky-200 hover:shadow-[0_8px_30px_rgba(14,165,233,0.08)] hover:-translate-y-px active:scale-[0.99] animate-fade-in-up"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="h-10 w-10 shrink-0 rounded-xl bg-gradient-to-br from-sky-500 to-cyan-400 flex items-center justify-center text-white text-sm font-black shadow-md">
+                              {(client.first_name?.[0] || "").toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-bold text-slate-900">
+                                {client.first_name} {client.last_name}
+                              </p>
+                              <p className="mt-0.5 text-xs font-medium text-slate-400">{client.phone}</p>
+                            </div>
+                          </div>
+                          <svg className="w-4 h-4 text-slate-300 transition-all duration-200 group-hover:text-sky-500 group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                        </button>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
+                    <div className="h-20 w-20 rounded-3xl bg-gradient-to-br from-sky-50 to-cyan-50 flex items-center justify-center mb-5 shadow-inner">
+                      <svg className="w-8 h-8 text-sky-400 animate-float-soft" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    </div>
+                    <p className="text-sm font-bold text-slate-600">Recherchez un client existant</p>
+                    <p className="mt-1 text-xs text-slate-400 max-w-[220px]">Tapez un nom, un prénom ou un numéro de téléphone</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Right Panel: Creation Form ── */}
+            <div className="relative flex-1 flex flex-col bg-gradient-to-br from-slate-50 via-white to-sky-50/30">
+              {/* Decorative blobs */}
+              <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div className="absolute right-0 top-0 h-72 w-72 rounded-full bg-sky-100/20 blur-3xl animate-float delay-500" />
+                <div className="absolute left-1/4 bottom-0 h-56 w-56 rounded-full bg-cyan-100/20 blur-3xl animate-float delay-200" />
+              </div>
+
+              <div className="relative flex-1 flex flex-col justify-center p-6 lg:p-10 xl:p-14">
+                <form onSubmit={handleCreateClientSubmit} className="w-full max-w-xl mx-auto space-y-7 animate-fade-in-up">
+                  {/* Header */}
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-sky-500 to-cyan-400 px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.25em] text-white shadow-[0_8px_25px_rgba(14,165,233,0.25)]">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                      Nouveau compte
+                    </div>
+                    <h2 className="mt-4 text-3xl font-black tracking-tight text-slate-900 lg:text-4xl">
+                      Créer un client
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-500 leading-relaxed max-w-md">
+                      Remplissez les informations du client, générez un code secret, puis validez la création.
+                    </p>
+                  </div>
+
+                  {/* Name fields */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Nom</label>
+                      <input
+                        type="text"
+                        value={createLastName}
+                        onChange={(e) => setCreateLastName(e.target.value)}
+                        placeholder="Nom de famille"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium text-slate-900 outline-none transition-all duration-300 placeholder:text-slate-400 focus:border-sky-400 focus:shadow-[0_0_0_4px_rgba(14,165,233,0.1)]"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Prénom</label>
+                      <input
+                        type="text"
+                        value={createFirstName}
+                        onChange={(e) => setCreateFirstName(e.target.value)}
+                        placeholder="Prénom du client"
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-medium text-slate-900 outline-none transition-all duration-300 placeholder:text-slate-400 focus:border-sky-400 focus:shadow-[0_0_0_4px_rgba(14,165,233,0.1)]"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Phone */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Numéro de téléphone</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
+                        <svg className="w-4.5 h-4.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                      </div>
+                      <input
+                        type="text"
+                        value={createPhone}
+                        onChange={(e) => setCreatePhone(e.target.value)}
+                        placeholder="05XX XXX XXX"
+                        dir="ltr"
+                        className="w-full rounded-xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm font-medium text-slate-900 outline-none transition-all duration-300 placeholder:text-slate-400 focus:border-sky-400 focus:shadow-[0_0_0_4px_rgba(14,165,233,0.1)]"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Secret Code */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Code secret</label>
+                    <div className="flex gap-3">
+                      <div className="relative flex-1">
+                        <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
+                          <svg className="w-4.5 h-4.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                        </div>
+                        <input
+                          type="text"
+                          value={createSecretCode}
+                          onChange={(e) => setCreateSecretCode(e.target.value)}
+                          placeholder="6 chiffres"
+                          className="w-full rounded-xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 tracking-[0.35em] text-sm font-bold text-slate-900 outline-none transition-all duration-300 placeholder:text-slate-400 placeholder:tracking-normal focus:border-sky-400 focus:shadow-[0_0_0_4px_rgba(14,165,233,0.1)]"
+                          maxLength={6}
+                          required
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={regenerateSecretCode}
+                        className="shrink-0 rounded-xl bg-slate-900 px-5 py-3.5 text-sm font-bold text-white shadow-lg transition-all duration-200 hover:bg-slate-800 hover:shadow-xl hover:-translate-y-0.5 active:scale-95"
+                      >
+                        Générer
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Submit */}
+                  <button
+                    type="submit"
+                    disabled={creatingAccount}
+                    className="group relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-sky-600 via-sky-500 to-cyan-500 px-6 py-4 text-sm font-black text-white shadow-[0_14px_40px_rgba(14,165,233,0.3)] transition-all duration-300 hover:shadow-[0_20px_50px_rgba(14,165,233,0.4)] hover:-translate-y-0.5 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <span className="relative z-10 flex items-center justify-center gap-2">
+                      {creatingAccount ? (
+                        <>
+                          <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                          Création en cours...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-5 h-5 transition-transform duration-300 group-hover:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                          Créer le compte
+                        </>
+                      )}
+                    </span>
+                    <div className="absolute inset-0 bg-gradient-to-r from-sky-500 to-cyan-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+          </div>
+        ) : (
+          <div className="space-y-6 p-3 sm:p-4 lg:p-6">
+            <div className="glass-card p-6 sm:p-8 animate-fade-in-up">
         {/* 1. CALENDAR TAB */}
         {activeTab === "calendar" && (
           <div className="space-y-6">
@@ -1341,199 +1573,6 @@ export function AdminAssistantPage({
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* 2. CREATION TAB */}
-        {activeTab === "creation" && (
-          <div className="relative overflow-hidden rounded-[2rem] border border-sky-100 bg-white/80 p-4 shadow-[0_18px_45px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:p-6 lg:p-8">
-            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[2rem]">
-              <div className="absolute -left-16 top-8 h-40 w-40 rounded-full bg-sky-200/30 blur-3xl animate-float" />
-              <div className="absolute right-0 top-20 h-56 w-56 rounded-full bg-cyan-200/20 blur-3xl animate-float delay-300" />
-            </div>
-
-            <div className="relative space-y-6">
-              {creationStep === "ticket" && ticketPreview ? (
-                <div className="space-y-4 animate-fade-in-up">
-                  <div className="flex flex-col gap-4 rounded-[1.75rem] border border-sky-100 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.05)] sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                    <div>
-                      <p className="text-[11px] font-black uppercase tracking-[0.35em] text-sky-500">Ticket prêt</p>
-                      <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">
-                        Remettez ce ticket au client
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-500">
-                        Le code secret et les infos de connexion sont affichés ci-dessous.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={resetCreationWorkflow}
-                        className="rounded-2xl border border-sky-100 bg-sky-50 px-5 py-3 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
-                      >
-                        Nouveau client
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/admin/dashboard/customers/${ticketCustomerId ?? ""}/ticket`, { replace: false, state: { receipt: ticketPreview } })}
-                        className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-                      >
-                        Ouvrir la page ticket
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[1.75rem] border border-sky-100 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.05)] sm:p-5">
-                    <TicketPrinter receipt={ticketPreview} showPrintButton title="Ticket de création de compte" />
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="animate-fade-in-up">
-                    <p className="text-[11px] font-black uppercase tracking-[0.35em] text-sky-500">Création client</p>
-                    <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
-                      Créez un compte, recherchez un client, puis ouvrez sa fiche détaillée.
-                    </h3>
-                  </div>
-
-                  <div className="rounded-[1.75rem] border border-sky-100 bg-white p-4 sm:p-5 shadow-[0_18px_45px_rgba(15,23,42,0.05)] animate-fade-in-up delay-100">
-                    <label className="block text-[11px] font-black uppercase tracking-[0.3em] text-slate-500">
-                      Recherche client
-                      <div className="relative mt-3">
-                        <input
-                          type="text"
-                          value={searchClientQuery}
-                          onChange={(e) => setSearchClientQuery(e.target.value)}
-                          placeholder={t("searchClients")}
-                          className="w-full rounded-[1.25rem] border border-sky-100 bg-sky-50/40 py-4 pl-4 pr-14 text-sm font-medium outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:bg-white"
-                        />
-                        <button
-                          type="button"
-                          aria-label="Scanner QR"
-                          className="absolute right-2 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-[1rem] border border-sky-100 bg-white text-sky-600 shadow-sm transition hover:bg-sky-50"
-                        >
-                          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4h6M4 4v6M20 4h-6M20 4v6M4 20h6M4 20v-6M20 20h-6m6 0v-6" />
-                          </svg>
-                        </button>
-                      </div>
-                    </label>
-
-                    <div className="mt-4">
-                      {searchClientQuery.trim() ? (
-                        loadingClients ? (
-                          <div className="rounded-[1.25rem] border border-sky-100 bg-sky-50/30 px-4 py-6 text-sm text-slate-500">
-                            {t("loading")}
-                          </div>
-                        ) : clients.length === 0 ? (
-                          <div className="rounded-[1.25rem] border border-dashed border-sky-100 bg-sky-50/20 px-4 py-6 text-sm text-slate-400">
-                            {t("noClientsFound")}
-                          </div>
-                        ) : (
-                          <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
-                            {clients.map((client) => (
-                              <button
-                                key={client.id}
-                                type="button"
-                                onClick={() => navigate(`/admin/dashboard/customers/${client.id}`)}
-                                className="group flex w-full items-center justify-between gap-4 rounded-[1.25rem] border border-sky-100 bg-white px-4 py-4 text-left shadow-[0_10px_24px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-[0_18px_34px_rgba(15,23,42,0.08)]"
-                              >
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-black text-slate-900">
-                                    {client.first_name} {client.last_name}
-                                  </p>
-                                  <p className="mt-0.5 text-xs font-semibold text-slate-500">{client.phone}</p>
-                                </div>
-                                <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-sky-50 text-sky-600 transition group-hover:bg-sky-100">
-                                  →
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        )
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <form onSubmit={handleCreateClientSubmit} className="rounded-[1.75rem] border border-sky-100 bg-white p-4 shadow-[0_18px_45px_rgba(15,23,42,0.05)] sm:p-5 animate-fade-in-up delay-200">
-                    <div className="mb-5 flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.3em] text-sky-500">Nouveau compte</p>
-                        <h4 className="mt-2 text-xl font-black text-slate-900">Créer un Compte Client</h4>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <label className="block text-sm font-semibold text-slate-700">
-                        Nom
-                        <input
-                          type="text"
-                          value={createLastName}
-                          onChange={(e) => setCreateLastName(e.target.value)}
-                          className="mt-2 w-full rounded-[1.25rem] border border-sky-100 bg-sky-50/30 px-4 py-3.5 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:bg-white"
-                          required
-                        />
-                      </label>
-
-                      <label className="block text-sm font-semibold text-slate-700">
-                        Prénom
-                        <input
-                          type="text"
-                          value={createFirstName}
-                          onChange={(e) => setCreateFirstName(e.target.value)}
-                          className="mt-2 w-full rounded-[1.25rem] border border-sky-100 bg-sky-50/30 px-4 py-3.5 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:bg-white"
-                          required
-                        />
-                      </label>
-                    </div>
-
-                    <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(240px,0.9fr)]">
-                      <label className="block text-sm font-semibold text-slate-700">
-                        Numéro de téléphone
-                        <input
-                          type="text"
-                          value={createPhone}
-                          onChange={(e) => setCreatePhone(e.target.value)}
-                          className="mt-2 w-full rounded-[1.25rem] border border-sky-100 bg-sky-50/30 px-4 py-3.5 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:bg-white"
-                          required
-                        />
-                      </label>
-
-                      <label className="block text-sm font-semibold text-slate-700">
-                        Code secret
-                        <div className="mt-2 flex gap-3">
-                          <input
-                            type="text"
-                            value={createSecretCode}
-                            onChange={(e) => setCreateSecretCode(e.target.value)}
-                            className="min-w-0 flex-1 rounded-[1.25rem] border border-sky-100 bg-sky-50/30 px-4 py-3.5 tracking-[0.28em] outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:bg-white"
-                            maxLength={6}
-                            required
-                          />
-                          <button
-                            type="button"
-                            onClick={regenerateSecretCode}
-                            className="shrink-0 rounded-[1.25rem] bg-gradient-to-r from-sky-600 to-cyan-500 px-4 py-3.5 text-sm font-semibold text-white shadow-[0_18px_35px_rgba(14,165,233,0.24)] transition hover:-translate-y-0.5 hover:from-sky-500 hover:to-cyan-400"
-                          >
-                            Générer
-                          </button>
-                        </div>
-                      </label>
-                    </div>
-
-                    <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                      <button
-                        type="submit"
-                        disabled={creatingAccount}
-                        className="inline-flex min-h-12 flex-1 items-center justify-center rounded-[1.25rem] bg-gradient-to-r from-sky-600 to-cyan-500 px-5 py-3.5 text-sm font-black text-white shadow-[0_18px_35px_rgba(14,165,233,0.24)] transition hover:-translate-y-0.5 hover:from-sky-500 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {creatingAccount ? "Création..." : "Créer compte"}
-                      </button>
-                    </div>
-                  </form>
-                </>
-              )}
-            </div>
           </div>
         )}
 

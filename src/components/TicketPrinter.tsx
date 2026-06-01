@@ -60,13 +60,11 @@ export function TicketPrinter({
     <div dir={isArabic ? "rtl" : "ltr"} className="ticket-printer-shell">
       <div className="mx-auto flex justify-center overflow-auto rounded-[1.5rem] bg-slate-100 p-4">
         <article className="thermal-ticket bg-white px-4 py-5 text-[13px] leading-5 text-slate-900 shadow-lg">
-          <header className="border-b border-dashed border-slate-300 pb-3 text-center">
-            <div className="flex items-center justify-center gap-3">
-              <img src={logoImg} alt="logo" className="h-8 w-auto" />
-              <div className="text-left">
-                <p className="text-sm font-bold uppercase tracking-[0.35em] text-slate-900">{receipt.establishmentName}</p>
-                <p className="mt-1 text-xs text-slate-500">{title || t("ticketTitle")}</p>
-              </div>
+          <header className="border-b border-dashed border-slate-300 pb-3 text-center flex flex-col items-center justify-center gap-2">
+            <img src={logoImg} alt="logo" className="mx-auto h-12 w-auto" />
+            <div>
+              <p className="text-sm font-bold uppercase tracking-[0.35em] text-slate-900">Laverie de la residence</p>
+              <p className="mt-1 text-xs text-slate-500">{title || t("ticketTitle")}</p>
             </div>
           </header>
 

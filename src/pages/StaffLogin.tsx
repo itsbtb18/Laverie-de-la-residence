@@ -73,7 +73,7 @@ export function StaffLogin({ language, onChangeLanguage }: StaffLoginProps) {
         return;
       }
 
-      navigate("/admin/dashboard/calendar", { replace: true });
+      navigate("/admin/dashboard/creation", { replace: true });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : t("staffAccessDenied"));
     } finally {
