@@ -40,6 +40,34 @@ export const appResources = {
       staffSignIn: "Connexion",
       authInvalidCredentials: "Identifiants invalides.",
       staffAccessDenied: "Accès réservé au personnel autorisé.",
+      errors: {
+        generic: "Une erreur est survenue. Veuillez réessayer.",
+        networkError:
+          "Impossible de contacter le serveur. Vérifiez votre connexion et que l'application backend est démarrée.",
+        serverError: "Le serveur a rencontré une erreur. Réessayez dans quelques instants.",
+        authMissingFields: "Veuillez saisir votre numéro de téléphone et votre code secret.",
+        authInvalidCredentials:
+          "Numéro de téléphone ou code secret incorrect. Vérifiez vos informations.",
+        authAccountInactive:
+          "Ce compte est désactivé. Veuillez contacter la laverie ou votre administrateur.",
+        staffAccessDenied:
+          "Accès réservé au personnel autorisé. Utilisez la page de connexion personnel.",
+        customerUseClientPortal:
+          "Ce compte est un compte client. Utilisez la page de connexion client (/login).",
+        phoneAlreadyExists:
+          "Un compte est déjà enregistré avec ce numéro de téléphone.",
+        phoneAlreadyExistsWithId:
+          "Un client existe déjà avec ce numéro (fiche n°{{id}}). Utilisez la recherche pour l'ouvrir.",
+        phoneInvalidFormat:
+          "Numéro invalide. Utilisez 10 chiffres commençant par 02, 05, 06 ou 07.",
+        secretCodeInvalidFormat: "Le code secret doit contenir exactement 6 chiffres.",
+        clientFormRequired:
+          "Veuillez remplir le nom, le prénom, le téléphone et le code secret.",
+        fieldRequired: "Certains champs obligatoires sont manquants.",
+        validationError: "Les informations saisies ne sont pas valides.",
+        notFound: "Élément introuvable.",
+        permissionDenied: "Vous n'avez pas l'autorisation pour cette action.",
+      },
       phoneNumber: "Numéro de téléphone",
       phonePlaceholder: "05XXXXXXXX",
       secretCode: "Code secret",
@@ -317,6 +345,33 @@ export const appResources = {
       staffSignIn: "دخول",
       authInvalidCredentials: "بيانات الدخول غير صحيحة.",
       staffAccessDenied: "الدخول مخصص للموظفين المعتمدين فقط.",
+      errors: {
+        generic: "حدث خطأ. يرجى المحاولة مرة أخرى.",
+        networkError:
+          "تعذر الاتصال بالخادم. تحقق من الاتصال وأن الخادم يعمل.",
+        serverError: "حدث خطأ في الخادم. حاول مرة أخرى بعد قليل.",
+        authMissingFields: "يرجى إدخال رقم الهاتف والرمز السري.",
+        authInvalidCredentials:
+          "رقم الهاتف أو الرمز السري غير صحيح. تحقق من المعلومات.",
+        authAccountInactive:
+          "هذا الحساب معطّل. يرجى الاتصال بالمغسلة أو المسؤول.",
+        staffAccessDenied:
+          "الدخول مخصص للموظفين المعتمدين. استخدم صفحة دخول الموظفين.",
+        customerUseClientPortal:
+          "هذا حساب عميل. استخدم صفحة دخول العملاء (/login).",
+        phoneAlreadyExists: "يوجد حساب مسجّل مسبقاً بهذا الرقم.",
+        phoneAlreadyExistsWithId:
+          "يوجد عميل بهذا الرقم (الملف رقم {{id}}). استخدم البحث لفتحه.",
+        phoneInvalidFormat:
+          "رقم غير صالح. استخدم 10 أرقام تبدأ بـ 02 أو 05 أو 06 أو 07.",
+        secretCodeInvalidFormat: "يجب أن يتكون الرمز السري من 6 أرقام بالضبط.",
+        clientFormRequired:
+          "يرجى ملء الاسم، اللقب، الهاتف والرمز السري.",
+        fieldRequired: "بعض الحقول الإلزامية ناقصة.",
+        validationError: "المعلومات المدخلة غير صالحة.",
+        notFound: "العنصر غير موجود.",
+        permissionDenied: "ليس لديك صلاحية لهذا الإجراء.",
+      },
       phoneNumber: "رقم الهاتف",
       phonePlaceholder: "05XXXXXXXX",
       secretCode: "الرمز السري",

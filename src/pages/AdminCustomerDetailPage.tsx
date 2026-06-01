@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { authHeader, getAuthSession } from "../auth/session";
 import type { AppLanguage } from "../i18n";
+import { readApiErrorPayload, resolveApiErrorMessage } from "../utils/apiErrors";
+import { isValidAlgerianPhone, isValidSecretCode, normalizePhoneInput } from "../utils/validation";
 
 type AdminCustomerDetailPageProps = {
   language: AppLanguage;
@@ -34,6 +37,7 @@ type Booking = {
 };
 
 export function AdminCustomerDetailPage({ language }: AdminCustomerDetailPageProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const params = useParams();
   const session = getAuthSession();
@@ -123,11 +127,27 @@ export function AdminCustomerDetailPage({ language }: AdminCustomerDetailPagePro
     setSaving(true);
     setError(null);
 
+    if (!firstName.trim() || !lastName.trim() || !phone.trim()) {
+      setError(t("errors.clientFormRequired"));
+      setSaving(false);
+      return;
+    }
+    if (!isValidAlgerianPhone(phone)) {
+      setError(t("errors.phoneInvalidFormat"));
+      setSaving(false);
+      return;
+    }
+    if (secretCode.trim() && !isValidSecretCode(secretCode)) {
+      setError(t("errors.secretCodeInvalidFormat"));
+      setSaving(false);
+      return;
+    }
+
     try {
       const payload: Record<string, string> = {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
-        phone: phone.trim(),
+        phone: normalizePhoneInput(phone),
       };
 
       if (secretCode.trim()) {
@@ -144,15 +164,21 @@ export function AdminCustomerDetailPage({ language }: AdminCustomerDetailPagePro
       });
 
       if (!response.ok) {
-        const errorPayload = await response.json();
-        throw new Error(errorPayload.detail || "Erreur de mise à jour.");
+        const errorPayload = await readApiErrorPayload(response);
+        throw new Error(
+          resolveApiErrorMessage(errorPayload, "adminUpdateCustomer", t, {
+            status: response.status,
+          })
+        );
       }
 
       const updated = (await response.json()) as Customer;
       setCustomer(updated);
       setSecretCode("");
     } catch (errorValue) {
-      setError(errorValue instanceof Error ? errorValue.message : "Erreur de mise à jour.");
+      setError(
+        errorValue instanceof Error ? errorValue.message : t("errors.generic")
+      );
     } finally {
       setSaving(false);
     }
@@ -203,22 +229,19 @@ export function AdminCustomerDetailPage({ language }: AdminCustomerDetailPagePro
       });
 
       if (!response.ok) {
-        let serverMsg = "Impossible de supprimer le client.";
-        try {
-          const payload = await response.json();
-          serverMsg = payload.detail || payload.message || JSON.stringify(payload);
-          console.error("Delete client server response:", payload);
-        } catch (parseErr) {
-          console.error("Delete client: failed to parse error body", parseErr);
-        }
-        throw new Error(serverMsg);
+        const payload = await readApiErrorPayload(response);
+        throw new Error(
+          resolveApiErrorMessage(payload, "adminGeneral", t, {
+            status: response.status,
+          })
+        );
       }
 
       setShowDeleteModal(false);
       navigate("/admin/dashboard/creation", { replace: true });
     } catch (err) {
       console.error("Delete client error:", err);
-      setError(err instanceof Error ? err.message : "Impossible de supprimer le client.");
+      setError(err instanceof Error ? err.message : t("errors.generic"));
     } finally {
       setDeleting(false);
     }

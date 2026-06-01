@@ -4,6 +4,12 @@ import { useNavigate } from "react-router-dom";
 
 import { saveAuthSession } from "../auth/session";
 import type { AppLanguage } from "../i18n";
+import {
+  readApiErrorPayload,
+  resolveApiErrorMessage,
+  validateLoginForm,
+} from "../utils/apiErrors";
+import { normalizePhoneInput } from "../utils/validation";
 import backgroundImg from "../assets/background.png";
 import logoImg from "../assets/logo.png";
 
@@ -39,32 +45,49 @@ export function UserLogin({ language, onChangeLanguage }: UserLoginProps) {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+
+    const validationError = validateLoginForm(phoneNumber, secretCode, t);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const response = await fetch("/api/auth/login/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phoneNumber, secret_code: secretCode }),
+        body: JSON.stringify({
+          phone: normalizePhoneInput(phoneNumber),
+          secret_code: secretCode.trim(),
+        }),
       });
 
-      const payload = (await response.json()) as LoginResponse & { detail?: string };
+      const payload = await readApiErrorPayload(response);
+
       if (!response.ok) {
-        throw new Error(payload.detail || t("authInvalidCredentials"));
+        setError(
+          resolveApiErrorMessage(payload, "customerLogin", t, {
+            status: response.status,
+          })
+        );
+        return;
       }
 
+      const data = payload as LoginResponse;
       saveAuthSession({
-        accessToken: payload.access_token,
-        role: payload.role,
-        establishmentId: payload.establishment_id,
-        establishmentName: payload.establishment_name ?? null,
-        userId: payload.user_id,
-        phone: payload.phone,
+        accessToken: data.access_token,
+        role: data.role,
+        establishmentId: data.establishment_id,
+        establishmentName: data.establishment_name ?? null,
+        userId: data.user_id,
+        phone: data.phone,
       });
 
       navigate("/appointments", { replace: true });
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t("authInvalidCredentials"));
+    } catch {
+      setError(t("errors.networkError"));
     } finally {
       setSubmitting(false);
     }
@@ -172,7 +195,7 @@ export function UserLogin({ language, onChangeLanguage }: UserLoginProps) {
                 onChange={(event) => setPhoneNumber(event.target.value)}
                 inputMode="numeric"
                 dir="ltr"
-                placeholder=""
+                placeholder={t("phonePlaceholder")}
                 className="w-full rounded-2xl border border-sky-100 bg-sky-50/30 px-4 py-3 text-slate-950 shadow-sm outline-none transition focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100 text-base font-medium"
               />
             </div>
@@ -187,7 +210,7 @@ export function UserLogin({ language, onChangeLanguage }: UserLoginProps) {
                 type="password"
                 inputMode="numeric"
                 dir="ltr"
-                placeholder=""
+                placeholder={t("secretCodePlaceholder")}
                 className="w-full rounded-2xl border border-sky-100 bg-sky-50/30 px-4 py-3 text-slate-950 shadow-sm outline-none transition focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100 text-base font-medium tracking-[0.25em]"
               />
             </div>

@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.db import transaction
 from rest_framework import serializers
 
+from .api_errors import ErrorCode
 from .models import (
     Booking,
     BookingStatus,
@@ -11,6 +12,9 @@ from .models import (
     Resource,
     SystemConfig,
     UserRole,
+    normalize_phone,
+    phone_validator,
+    secret_code_validator,
 )
 
 
@@ -131,6 +135,27 @@ class CustomUserSerializer(serializers.ModelSerializer):
     def get_secret_code_preview(self, obj):
         return obj.secret_code_plain or "******"
 
+    def validate_phone(self, value: str) -> str:
+        normalized = normalize_phone(value)
+        try:
+            phone_validator(normalized)
+        except Exception as exc:
+            raise serializers.ValidationError(
+                "Le numéro doit être algérien et commencer par 02, 05, 06 ou 07.",
+                code=ErrorCode.PHONE_INVALID_FORMAT,
+            ) from exc
+        return normalized
+
+    def validate_secret_code(self, value: str) -> str:
+        try:
+            secret_code_validator(str(value))
+        except Exception as exc:
+            raise serializers.ValidationError(
+                "Le code secret doit contenir exactement 6 chiffres.",
+                code=ErrorCode.SECRET_CODE_INVALID_FORMAT,
+            ) from exc
+        return str(value)
+
     def validate(self, attrs):
         role = attrs.get("role", getattr(self.instance, "role", UserRole.CUSTOMER))
         establishment = attrs.get(
@@ -139,11 +164,34 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
         if role == UserRole.ADMIN and establishment is None:
             raise serializers.ValidationError(
-                {"establishment": "Un ADMIN doit être lié à un établissement."}
+                {
+                    "code": ErrorCode.FIELD_REQUIRED,
+                    "establishment": [
+                        "Un assistant doit être rattaché à un établissement."
+                    ],
+                }
             )
 
         if role == UserRole.SUPER_ADMIN:
             attrs["establishment"] = None
+
+        phone = attrs.get("phone")
+        if phone is not None:
+            qs = CustomUser.objects.filter(phone=phone)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                existing = qs.first()
+                payload: dict[str, object] = {
+                    "code": ErrorCode.PHONE_ALREADY_EXISTS,
+                    "detail": "Un compte existe déjà avec ce numéro de téléphone.",
+                    "phone": [
+                        "Un compte existe déjà avec ce numéro de téléphone."
+                    ],
+                }
+                if existing and existing.role == UserRole.CUSTOMER:
+                    payload["existing_user_id"] = existing.id
+                raise serializers.ValidationError(payload)
 
         return attrs
 
@@ -261,6 +309,29 @@ class SuperAdminManagerSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "date_joined", "is_active", "is_staff", "role"]
 
+    def validate_phone(self, value: str) -> str:
+        normalized = normalize_phone(value)
+        try:
+            phone_validator(normalized)
+        except Exception as exc:
+            raise serializers.ValidationError(
+                "Le numéro doit être algérien et commencer par 02, 05, 06 ou 07.",
+                code=ErrorCode.PHONE_INVALID_FORMAT,
+            ) from exc
+        return normalized
+
+    def validate_secret_code(self, value: str) -> str:
+        if not value:
+            return value
+        try:
+            secret_code_validator(str(value))
+        except Exception as exc:
+            raise serializers.ValidationError(
+                "Le code secret doit contenir exactement 6 chiffres.",
+                code=ErrorCode.SECRET_CODE_INVALID_FORMAT,
+            ) from exc
+        return str(value)
+
     def validate(self, attrs):
         establishment = attrs.get(
             "establishment", getattr(self.instance, "establishment", None)
@@ -268,8 +339,29 @@ class SuperAdminManagerSerializer(serializers.ModelSerializer):
 
         if establishment is None:
             raise serializers.ValidationError(
-                {"establishment": "Un assistant doit être lié à un établissement."}
+                {
+                    "code": ErrorCode.FIELD_REQUIRED,
+                    "establishment": [
+                        "Un assistant doit être rattaché à un établissement."
+                    ],
+                }
             )
+
+        phone = attrs.get("phone")
+        if phone is not None:
+            qs = CustomUser.objects.filter(phone=phone)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {
+                        "code": ErrorCode.PHONE_ALREADY_EXISTS,
+                        "detail": "Un compte existe déjà avec ce numéro de téléphone.",
+                        "phone": [
+                            "Un compte existe déjà avec ce numéro de téléphone."
+                        ],
+                    }
+                )
 
         return attrs
 

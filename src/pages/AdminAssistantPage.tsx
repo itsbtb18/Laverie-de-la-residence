@@ -37,6 +37,12 @@ import {
   WhatsAppQrScanner,
 } from "../components/WhatsAppQrScanner";
 import { TicketPrinter, TicketReceipt } from "../components/TicketPrinter";
+import {
+  readApiErrorPayload,
+  resolveApiErrorMessage,
+  validateAdminCustomerForm,
+} from "../utils/apiErrors";
+import { normalizePhoneInput } from "../utils/validation";
 
 const CREATION_TICKET_STORAGE_KEY = "chrono-dz:last-created-ticket";
 
@@ -597,9 +603,11 @@ export function AdminAssistantPage({
         });
 
         if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
+          const err = await readApiErrorPayload(response);
           throw new Error(
-            (err as { detail?: string }).detail || "Impossible d'identifier le client."
+            resolveApiErrorMessage(err, "adminGeneral", t, {
+              status: response.status,
+            })
           );
         }
 
@@ -613,7 +621,9 @@ export function AdminAssistantPage({
       } catch (errorValue) {
         clientQrScanHandledRef.current = false;
         showError(
-          errorValue instanceof Error ? errorValue.message : "Erreur lors du scan."
+          errorValue instanceof Error
+            ? errorValue.message
+            : t("errors.generic")
         );
       } finally {
         setResolvingClientQr(false);
@@ -714,15 +724,23 @@ export function AdminAssistantPage({
   // Register client inside booking modal
   const handleQuickCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickLastName.trim() || !quickFirstName.trim() || !quickPhone.trim()) {
-      showError(t("formRequired"));
+    const secret = String(Math.floor(100000 + Math.random() * 900000));
+    const validationError = validateAdminCustomerForm(
+      {
+        firstName: quickFirstName,
+        lastName: quickLastName,
+        phone: quickPhone,
+        secretCode: secret,
+      },
+      t
+    );
+    if (validationError) {
+      showError(validationError);
       return;
     }
 
     setQuickSubmitting(true);
     try {
-      // Auto-generate code
-      const secret = String(Math.floor(100000 + Math.random() * 900000));
       const res = await fetch("/api/users/", {
         method: "POST",
         headers: {
@@ -730,7 +748,7 @@ export function AdminAssistantPage({
           ...authHeader(),
         },
         body: JSON.stringify({
-          phone: quickPhone.trim(),
+          phone: normalizePhoneInput(quickPhone),
           first_name: quickFirstName.trim(),
           last_name: quickLastName.trim(),
           secret_code: secret,
@@ -744,17 +762,20 @@ export function AdminAssistantPage({
         showSuccess(t("newClient") + " créé !");
         setSelectedClientForBooking(newCust);
         setQuickCreateOpen(false);
-        // Clear fields
         setQuickFirstName("");
         setQuickLastName("");
         setQuickPhone("");
         triggerRefresh();
       } else {
-        const errData = await res.json();
-        showError(errData.detail || errData.phone?.[0] || "Erreur lors de la création.");
+        const errData = await readApiErrorPayload(res);
+        showError(
+          resolveApiErrorMessage(errData, "adminCreateCustomer", t, {
+            status: res.status,
+          })
+        );
       }
-    } catch (err) {
-      showError("Erreur de connexion.");
+    } catch {
+      showError(t("errors.networkError"));
     } finally {
       setQuickSubmitting(false);
     }
@@ -767,86 +788,48 @@ export function AdminAssistantPage({
     phoneNumber: string;
     secretCode: string;
   }) => {
+    const validationError = validateAdminCustomerForm(
+      {
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+        phone: payload.phoneNumber,
+        secretCode: payload.secretCode,
+      },
+      t
+    );
+    if (validationError) {
+      showError(validationError);
+      throw new Error(validationError);
+    }
+
     try {
-      console.log("Creating client payload:", payload);
-      showSuccess("Envoi de la requête de création...");
-      const _auth = authHeader();
-      console.log("Auth header for create:", _auth);
       const res = await fetch("/api/users/", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ..._auth },
+        headers: { "Content-Type": "application/json", ...authHeader() },
         body: JSON.stringify({
-          first_name: payload.firstName,
-          last_name: payload.lastName,
-          phone: payload.phoneNumber,
-          secret_code: payload.secretCode,
+          first_name: payload.firstName.trim(),
+          last_name: payload.lastName.trim(),
+          phone: normalizePhoneInput(payload.phoneNumber),
+          secret_code: payload.secretCode.trim(),
           role: "CUSTOMER",
           created_in_person: true,
         }),
       });
 
       if (!res.ok) {
-        let errMsg = "Erreur création client";
-        try {
-          const err = await res.json();
-          errMsg = err.detail || err.phone?.[0] || JSON.stringify(err);
-          console.error("Create client error response:", err);
-          // If the server reports an error on the phone field (likely "already exists"),
-          // attempt to find the existing user and redirect to their ticket page.
-          if (err && err.phone) {
-            try {
-              const searchRes = await fetch(`/api/users/?search=${encodeURIComponent(payload.phoneNumber)}`, {
-                headers: { "Content-Type": "application/json", ..._auth },
-              });
-              if (searchRes.ok) {
-                const users = await searchRes.json();
-                if (Array.isArray(users) && users.length > 0) {
-                  const existing = users[0];
-                  const ticketPath = existing.ticket_url || `/admin/dashboard/customers/${existing.id}/ticket`;
-                  console.log("the ticket path : ", ticketPath);
-                  console.log("Existing user found, redirecting to ticket:", existing);
-                  showSuccess("Un compte existe déjà pour ce numéro — redirection...");
-                  try {
-                    navigate(ticketPath, { state: {} });
-                  } catch (navErr) {
-                    // fallback to hard navigation if SPA navigate fails
-                    window.location.href = ticketPath;
-                  }
-                  return;
-                }
-              }
-            } catch (searchErr) {
-              console.warn("Failed to lookup existing user:", searchErr);
-            }
-          }
-        } catch (parseErr) {
-          console.error("Failed to parse error response", parseErr);
-        }
+        const err = await readApiErrorPayload(res);
+        const errMsg = resolveApiErrorMessage(err, "adminCreateCustomer", t, {
+          status: res.status,
+        });
         showError(errMsg);
         throw new Error(errMsg);
       }
 
-      console.log("Create response status:", res.status, res.statusText, "ok=", res.ok);
-      let created: any = null;
-      try {
-        const raw = await res.text();
-        console.log("Create raw response text:", raw);
-        try {
-          created = JSON.parse(raw);
-        } catch (parseErr) {
-          console.warn("Failed to parse create response as JSON:", parseErr);
-          created = null;
-        }
-      } catch (textErr) {
-        console.error("Failed to read create response text:", textErr);
-      }
-
-      console.log("Created client response (parsed):", created);
+      const created = await res.json();
 
       if (!created || typeof created.id === "undefined") {
-        console.error("Invalid created response:", created);
-        showError("Réponse invalide du serveur. Voir la console.");
-        throw new Error("Réponse invalide du serveur");
+        showError(t("errors.serverError"));
+        throw new Error(t("errors.serverError"));
       }
 
       const ticketUrlFromApi = (created && created.ticket_url) || `/admin/dashboard/customers/${created.id}/ticket`;
@@ -875,12 +858,13 @@ export function AdminAssistantPage({
         console.warn("Failed to persist creation ticket in sessionStorage:", storageErr);
       }
 
-      // Redirect to the ticket page
       showSuccess("Client créé. Redirection vers le ticket...");
       navigate(ticketUrlFromApi, { state: { receipt } });
     } catch (err) {
-      console.error("Unexpected error during client creation:", err);
-      showError("Erreur lors de la création du client. Voir la console pour détails.");
+      if (err instanceof Error && err.message) {
+        throw err;
+      }
+      showError(t("errors.generic"));
       throw err;
     }
   };
@@ -891,8 +875,17 @@ export function AdminAssistantPage({
 
   const handleCreateClientSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!createLastName.trim() || !createFirstName.trim() || !createPhone.trim() || !createSecretCode.trim()) {
-      showError(t("formRequired"));
+    const validationError = validateAdminCustomerForm(
+      {
+        firstName: createFirstName,
+        lastName: createLastName,
+        phone: createPhone,
+        secretCode: createSecretCode,
+      },
+      t
+    );
+    if (validationError) {
+      showError(validationError);
       return;
     }
 

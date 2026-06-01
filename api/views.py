@@ -19,6 +19,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .api_errors import ErrorCode, error_response
 from .authentication import (
     ChronoJWTAuthentication,
     build_login_response,
@@ -256,17 +257,27 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             phone, secret_code = extract_login_payload(request.data)
 
         if not phone or not secret_code:
-            raise ValidationError(
-                {"detail": "Numéro de téléphone et code secret requis."}
+            return error_response(
+                ErrorCode.AUTH_MISSING_FIELDS,
+                "Numéro de téléphone et code secret requis.",
+                400,
             )
 
         try:
             user = CustomUser.objects.get(phone=phone, role=UserRole.CUSTOMER)
         except CustomUser.DoesNotExist:
-            return Response({"detail": "Client introuvable."}, status=404)
+            return error_response(
+                ErrorCode.NOT_FOUND,
+                "Aucun client ne correspond à ce QR code.",
+                404,
+            )
 
         if not user.check_secret_code(secret_code):
-            return Response({"detail": "Code secret invalide."}, status=401)
+            return error_response(
+                ErrorCode.AUTH_INVALID_CREDENTIALS,
+                "Code secret invalide pour ce client.",
+                401,
+            )
 
         return Response(
             {
@@ -935,23 +946,40 @@ class CustomerLoginAPIView(GenericAPIView):
     def post(self, request):
         phone, secret_code = extract_login_payload(request.data)
         if not phone or not secret_code:
-            return Response(
-                {"detail": "Numéro de téléphone et code secret requis."},
-                status=400,
+            return error_response(
+                ErrorCode.AUTH_MISSING_FIELDS,
+                "Veuillez renseigner votre numéro de téléphone et votre code secret.",
+                400,
             )
 
         try:
             user = CustomUser.objects.select_related("establishment").get(phone=phone)
         except CustomUser.DoesNotExist:
-            return Response({"detail": "Identifiants invalides."}, status=401)
+            return error_response(
+                ErrorCode.AUTH_INVALID_CREDENTIALS,
+                "Numéro de téléphone ou code secret incorrect.",
+                401,
+            )
+
+        if not user.is_active:
+            return error_response(
+                ErrorCode.AUTH_ACCOUNT_INACTIVE,
+                "Ce compte est désactivé. Veuillez contacter l'établissement.",
+                403,
+            )
 
         if not user.check_secret_code(secret_code):
-            return Response({"detail": "Identifiants invalides."}, status=401)
+            return error_response(
+                ErrorCode.AUTH_INVALID_CREDENTIALS,
+                "Numéro de téléphone ou code secret incorrect.",
+                401,
+            )
 
         if user.role != UserRole.CUSTOMER:
-            return Response(
-                {"detail": "Cette route est réservée aux clients."},
-                status=403,
+            return error_response(
+                ErrorCode.AUTH_INVALID_CREDENTIALS,
+                "Numéro de téléphone ou code secret incorrect.",
+                401,
             )
 
         return Response(build_login_response(user), status=200)
@@ -964,23 +992,47 @@ class StaffLoginAPIView(GenericAPIView):
     def post(self, request):
         phone, secret_code = extract_login_payload(request.data)
         if not phone or not secret_code:
-            return Response(
-                {"detail": "Numéro de téléphone et code secret requis."},
-                status=400,
+            return error_response(
+                ErrorCode.AUTH_MISSING_FIELDS,
+                "Veuillez renseigner votre numéro de téléphone et votre code secret.",
+                400,
             )
 
         try:
             user = CustomUser.objects.select_related("establishment").get(phone=phone)
         except CustomUser.DoesNotExist:
-            return Response({"detail": "Identifiants invalides."}, status=401)
+            return error_response(
+                ErrorCode.AUTH_INVALID_CREDENTIALS,
+                "Numéro de téléphone ou code secret incorrect.",
+                401,
+            )
+
+        if not user.is_active:
+            return error_response(
+                ErrorCode.AUTH_ACCOUNT_INACTIVE,
+                "Ce compte personnel est désactivé. Contactez le super administrateur.",
+                403,
+            )
 
         if not user.check_secret_code(secret_code):
-            return Response({"detail": "Identifiants invalides."}, status=401)
+            return error_response(
+                ErrorCode.AUTH_INVALID_CREDENTIALS,
+                "Numéro de téléphone ou code secret incorrect.",
+                401,
+            )
 
         if user.role == UserRole.CUSTOMER:
-            return Response(
-                {"detail": "Accès réservé au personnel autorisé."},
-                status=403,
+            return error_response(
+                ErrorCode.CUSTOMER_USE_CLIENT_PORTAL,
+                "Ce compte est un compte client. Utilisez la page de connexion client.",
+                403,
+            )
+
+        if user.role not in {UserRole.ADMIN, UserRole.SUPER_ADMIN}:
+            return error_response(
+                ErrorCode.STAFF_ACCESS_DENIED,
+                "Accès réservé au personnel autorisé.",
+                403,
             )
 
         return Response(build_login_response(user), status=200)

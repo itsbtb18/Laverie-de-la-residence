@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+
+import i18n from "../i18n";
+import { readApiErrorPayload, resolveApiErrorMessage } from "../utils/apiErrors";
 import {
   Area,
   AreaChart,
@@ -903,8 +906,12 @@ function superAdminFetch(path: string, options: RequestInit = {}) {
 
   return fetch(path, { ...options, headers, credentials: "include" }).then(async (response) => {
     if (!response.ok) {
-      const payload = await safeJson(response);
-      throw new Error(payload?.detail || payload?.message || `HTTP ${response.status}`);
+      const payload = await readApiErrorPayload(response);
+      throw new Error(
+        resolveApiErrorMessage(payload, "superAdmin", i18n.t.bind(i18n), {
+          status: response.status,
+        })
+      );
     }
     return response;
   });
