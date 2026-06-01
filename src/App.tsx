@@ -39,6 +39,17 @@ export default function App() {
     }
   }, [i18n, selectedLanguage]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !import.meta.env.DEV) {
+      return;
+    }
+
+    const { protocol, hostname, port } = window.location;
+    if (protocol === "http:" && (hostname === "127.0.0.1" || hostname === "localhost") && port === "5173") {
+      window.location.replace(window.location.href.replace(/^http:/, "https:"));
+    }
+  }, []);
+
   const language = selectedLanguage ?? "fr";
   const session = getAuthSession();
 

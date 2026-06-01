@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import logging
-import os
-from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 
-import requests
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import ExtractHour, ExtractWeekDay
@@ -47,6 +44,7 @@ from .serializers import (
     SuperAdminStatsSerializer,
     SystemConfigSerializer,
 )
+from .whatsapp_service import notify_booking_confirmation, notify_welcome_account
 
 OPENING_TIME = time(8, 0)
 CLOSING_TIME = time(22, 0)
@@ -79,29 +77,6 @@ class IsSuperAdmin(permissions.BasePermission):
             and request.user.is_authenticated
             and request.user.role == UserRole.SUPER_ADMIN
         )
-
-
-@dataclass(frozen=True)
-class NotificationPayload:
-    phone: str
-    message: str
-
-
-def send_whatsapp_notification(payload: NotificationPayload) -> None:
-    api_url = "http://localhost:5000/api/v1/send-notification"
-    api_key = os.getenv("DJANGO_API_KEY", "")
-    if not api_key:
-        return
-
-    try:
-        requests.post(
-            api_url,
-            json={"phone": payload.phone, "message": payload.message},
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10,
-        )
-    except requests.RequestException:
-        return
 
 
 def _active_resources_count(establishment_id: int) -> int:
@@ -178,16 +153,8 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         created_in_person = serializer.validated_data.get("created_in_person", False)
         user = serializer.save()
 
-        if created_in_person:
-            send_whatsapp_notification(
-                NotificationPayload(
-                    phone=user.phone,
-                    message=(
-                        f"Bienvenue {user.first_name} {user.last_name}. "
-                        f"Votre compte Laverie de la residence est prêt."
-                    ),
-                )
-            )
+        if user.role == UserRole.CUSTOMER:
+            notify_welcome_account(user, user.secret_code_plain or None)
 
     def create(self, request, *args, **kwargs):
         """Override create to include a ticket URL in the response so the frontend
@@ -296,14 +263,7 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         user = serializer.save()
 
         if user.role == UserRole.CUSTOMER and old_status != user.role:
-            send_whatsapp_notification(
-                NotificationPayload(
-                    phone=user.phone,
-                    message=(
-                        f"Bonjour {user.first_name}, votre compte a été créé avec succès sur Laverie de la residence."
-                    ),
-                )
-            )
+            notify_welcome_account(user, user.secret_code_plain or None)
 
 
 class BookingViewSet(viewsets.ModelViewSet):
@@ -598,16 +558,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             else None,
         )
 
-        if booking.status == BookingStatus.PAYE and booking.validated_by_id:
-            send_whatsapp_notification(
-                NotificationPayload(
-                    phone=booking.user.phone,
-                    message=(
-                        f"Bonjour {booking.user.first_name}, votre réservation du {booking.booking_date} "
-                        f"à {booking.start_time.strftime('%H:%M')} est validée."
-                    ),
-                )
-            )
+        notify_booking_confirmation(booking)
 
     def perform_update(self, serializer):
         previous_instance = self.get_object()
@@ -624,16 +575,11 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         booking = serializer.save()
 
-        if old_status != BookingStatus.PAYE and booking.status == BookingStatus.PAYE:
-            send_whatsapp_notification(
-                NotificationPayload(
-                    phone=booking.user.phone,
-                    message=(
-                        f"Bonjour {booking.user.first_name}, votre rendez-vous du {booking.booking_date} "
-                        f"à {booking.start_time.strftime('%H:%M')} a été validé."
-                    ),
-                )
-            )
+        if (
+            old_status == BookingStatus.ANNULE
+            and booking.status != BookingStatus.ANNULE
+        ):
+            notify_booking_confirmation(booking)
 
 
 class SuperAdminEstablishmentViewSet(viewsets.ModelViewSet):

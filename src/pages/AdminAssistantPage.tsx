@@ -33,6 +33,10 @@ import { LANGUAGE_STORAGE_KEY, type AppLanguage } from "../i18n";
 import logoImg from "../assets/logo.png";
 
 import {
+  AdminValidationPanel,
+  isBookingReferenceQuery,
+} from "../components/admin/AdminValidationPanel";
+import {
   ParsedWhatsAppQr,
   WhatsAppQrScanner,
 } from "../components/WhatsAppQrScanner";
@@ -42,6 +46,7 @@ import {
   resolveApiErrorMessage,
   validateAdminCustomerForm,
 } from "../utils/apiErrors";
+import { normalizeClientSearchQuery, parseUserListPayload } from "../utils/usersApi";
 import { normalizePhoneInput } from "../utils/validation";
 
 const CREATION_TICKET_STORAGE_KEY = "chrono-dz:last-created-ticket";
@@ -201,6 +206,7 @@ export function AdminAssistantPage({
   // Tab 1: Clients State (creation)
   const [searchClientQuery, setSearchClientQuery] = useState("");
   const [clients, setClients] = useState<Customer[]>([]);
+  const [clientSearchError, setClientSearchError] = useState<string | null>(null);
   const [loadingClients, setLoadingClients] = useState(false);
   const [creationStep, setCreationStep] = useState<"form" | "ticket">("form");
   const [ticketPreview, setTicketPreview] = useState<TicketReceipt | null>(null);
@@ -212,6 +218,7 @@ export function AdminAssistantPage({
   const [clientQrScannerOpen, setClientQrScannerOpen] = useState(false);
   const [resolvingClientQr, setResolvingClientQr] = useState(false);
   const clientQrScanHandledRef = useRef(false);
+  const validationQrHandledRef = useRef(false);
 
   // Tab 3: Calendar State
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -248,7 +255,8 @@ export function AdminAssistantPage({
   const [scanStatus, setScanStatus] = useState("idle");
   const [searchBookingQuery, setSearchBookingQuery] = useState("");
   const [foundBookings, setFoundBookings] = useState<Booking[]>([]);
-  const [loadingFoundBookings, setLoadingFoundBookings] = useState(false);
+  const [foundValidationClients, setFoundValidationClients] = useState<Customer[]>([]);
+  const [loadingValidationSearch, setLoadingValidationSearch] = useState(false);
   const [selectedBookingDetails, setSelectedBookingDetails] = useState<Booking | null>(null);
   const [validationState, setValidationState] = useState<"idle" | "submitting">("idle");
 
@@ -424,17 +432,41 @@ export function AdminAssistantPage({
 
     async function fetchClients() {
       setLoadingClients(true);
+      setClientSearchError(null);
       try {
-        const res = await fetch(
-          `/api/users/?role=CUSTOMER&search=${encodeURIComponent(searchClientQuery)}`,
-          { headers: authHeader() }
-        );
-        if (res.ok && active) {
-          const data = await res.json();
-          setClients(data);
+        const normalizedSearch = normalizeClientSearchQuery(searchClientQuery);
+        const params = new URLSearchParams({ role: "CUSTOMER" });
+        if (normalizedSearch) {
+          params.set("search", normalizedSearch);
         }
+
+        const res = await fetch(`/api/users/?${params.toString()}`, {
+          headers: authHeader(),
+        });
+
+        if (!active) {
+          return;
+        }
+
+        if (!res.ok) {
+          const payload = await readApiErrorPayload(res);
+          setClients([]);
+          setClientSearchError(
+            resolveApiErrorMessage(payload, "adminGeneral", t, {
+              status: res.status,
+            })
+          );
+          return;
+        }
+
+        const data = await res.json();
+        setClients(parseUserListPayload(data));
       } catch (err) {
         console.error(err);
+        if (active) {
+          setClients([]);
+          setClientSearchError(t("errors.networkError"));
+        }
       } finally {
         if (active) setLoadingClients(false);
       }
@@ -445,7 +477,7 @@ export function AdminAssistantPage({
       active = false;
       clearTimeout(timer);
     };
-  }, [searchClientQuery, activeTab, refreshCounter]);
+  }, [searchClientQuery, activeTab, refreshCounter, isTicketRoute, t]);
 
   // Manual Booking client search effect
   useEffect(() => {
@@ -458,13 +490,18 @@ export function AdminAssistantPage({
 
     async function fetchClientsForBooking() {
       try {
-        const res = await fetch(
-          `/api/users/?role=CUSTOMER&search=${encodeURIComponent(searchClientForBooking)}`,
-          { headers: authHeader() }
-        );
+        const normalizedSearch = normalizeClientSearchQuery(searchClientForBooking);
+        const params = new URLSearchParams({ role: "CUSTOMER" });
+        if (normalizedSearch) {
+          params.set("search", normalizedSearch);
+        }
+
+        const res = await fetch(`/api/users/?${params.toString()}`, {
+          headers: authHeader(),
+        });
         if (res.ok && active) {
           const data = await res.json();
-          setClientsForBookingResults(data);
+          setClientsForBookingResults(parseUserListPayload(data));
         }
       } catch (err) {
         console.error(err);
@@ -478,7 +515,7 @@ export function AdminAssistantPage({
     };
   }, [searchClientForBooking, selectedSlotForBooking]);
 
-  // Validation search effect
+  // Validation search: CRN-* → bookings only; else → clients (name / phone)
   useEffect(() => {
     if (isTicketRoute) {
       return;
@@ -486,34 +523,64 @@ export function AdminAssistantPage({
 
     let active = true;
     if (activeTab !== "validation") return;
-    if (!searchBookingQuery.trim()) {
+
+    const raw = searchBookingQuery.trim();
+    if (!raw) {
       setFoundBookings([]);
+      setFoundValidationClients([]);
       return;
     }
 
-    async function fetchBookings() {
-      setLoadingFoundBookings(true);
+    const bookingRefMode = isBookingReferenceQuery(raw);
+
+    async function runValidationSearch() {
+      setLoadingValidationSearch(true);
       try {
-        const res = await fetch(`/api/bookings/?search=${encodeURIComponent(searchBookingQuery)}`, {
-          headers: authHeader(),
-        });
-        if (res.ok && active) {
-          const data = await res.json();
-          setFoundBookings(data);
+        if (bookingRefMode) {
+          setFoundValidationClients([]);
+          const res = await fetch(`/api/bookings/?search=${encodeURIComponent(raw)}`, {
+            headers: authHeader(),
+          });
+          if (res.ok && active) {
+            const data = await res.json();
+            const list = Array.isArray(data) ? data : data.results ?? [];
+            setFoundBookings(list);
+          }
+        } else if (raw.length < 2) {
+          setFoundBookings([]);
+          setFoundValidationClients([]);
+        } else {
+          setFoundBookings([]);
+          const normalized = normalizeClientSearchQuery(raw);
+          const res = await fetch(
+            `/api/users/?search=${encodeURIComponent(normalized)}&role=CUSTOMER`,
+            { headers: authHeader() }
+          );
+          if (res.ok && active) {
+            setFoundValidationClients(parseUserListPayload(await res.json()) as Customer[]);
+          }
         }
       } catch (err) {
         console.error(err);
       } finally {
-        if (active) setLoadingFoundBookings(false);
+        if (active) setLoadingValidationSearch(false);
       }
     }
 
-    const timer = setTimeout(fetchBookings, 300);
+    const timer = setTimeout(runValidationSearch, 300);
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [searchBookingQuery, activeTab]);
+  }, [searchBookingQuery, activeTab, isTicketRoute]);
+
+  useEffect(() => {
+    if (activeTab !== "validation") return;
+    if (!isBookingReferenceQuery(searchBookingQuery)) return;
+    if (foundBookings.length === 1) {
+      setSelectedBookingDetails(foundBookings[0]);
+    }
+  }, [foundBookings, searchBookingQuery, activeTab]);
 
   useEffect(() => {
     // Always fetch real customer data from API when we have a customerId in the URL
@@ -558,13 +625,63 @@ export function AdminAssistantPage({
     };
   }, [isTicketRoute, ticketCustomerId, navigationState?.receipt]);
 
-  // Handle booking QR scan (validation tab)
-  const handleScan = useCallback(
-    (payload: ParsedWhatsAppQr) => {
+  const handleValidationScan = useCallback(
+    async (payload: ParsedWhatsAppQr) => {
       if (payload.kind === "booking-validation") {
+        validationQrHandledRef.current = false;
         setSearchBookingQuery(payload.bookingId);
         navigate(ADMIN_TAB_PATHS.validation, { replace: true });
         showSuccess(t("scanDetected"));
+        return;
+      }
+
+      if (payload.kind !== "login") {
+        showError(t("unknownQrFormat"));
+        return;
+      }
+
+      if (validationQrHandledRef.current) {
+        return;
+      }
+
+      validationQrHandledRef.current = true;
+      setResolvingClientQr(true);
+      try {
+        const response = await fetch("/api/users/resolve-login-qr/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeader(),
+          },
+          body: JSON.stringify({
+            qr_text: payload.rawText,
+            phone: payload.phone,
+            secret_code: payload.secretCode,
+          }),
+        });
+
+        if (!response.ok) {
+          const err = await readApiErrorPayload(response);
+          throw new Error(
+            resolveApiErrorMessage(err, "adminGeneral", t, {
+              status: response.status,
+            })
+          );
+        }
+
+        const data = (await response.json()) as {
+          id: number;
+          detail_url?: string;
+        };
+        navigate(data.detail_url || `/admin/dashboard/customers/${data.id}`);
+        showSuccess("Client identifié — ouverture de la fiche.");
+      } catch (errorValue) {
+        validationQrHandledRef.current = false;
+        showError(
+          errorValue instanceof Error ? errorValue.message : t("errors.generic")
+        );
+      } finally {
+        setResolvingClientQr(false);
       }
     },
     [navigate, t]
@@ -972,7 +1089,7 @@ export function AdminAssistantPage({
     } catch (err) {
       showError("Erreur.");
     } finally {
-      setValidationState("submitting");
+      setValidationState("idle");
     }
   };
 
@@ -1476,6 +1593,17 @@ export function AdminAssistantPage({
                       <div className="h-8 w-8 rounded-full border-[3px] border-slate-200 border-t-sky-500 animate-spin" />
                       <p className="mt-3 text-xs font-medium text-slate-400">Chargement des clients...</p>
                     </div>
+                  ) : clientSearchError ? (
+                    <div className="flex flex-col items-center justify-center py-12 px-4 text-center animate-fade-in-up">
+                      <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-800">
+                        {clientSearchError}
+                      </div>
+                      <p className="mt-3 text-xs text-slate-400">
+                        {window.location.protocol === "http:"
+                          ? "Ouvrez le site en https://127.0.0.1:5173 (requis pour l’API)."
+                          : "Vérifiez que le serveur Django tourne sur le port 8000."}
+                      </p>
+                    </div>
                   ) : clients.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in-up">
                       <div className="h-14 w-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
@@ -1518,6 +1646,29 @@ export function AdminAssistantPage({
               </div>
             </div>
           </div>
+        ) : activeTab === "validation" ? (
+          <AdminValidationPanel
+            searchQuery={searchBookingQuery}
+            onSearchChange={setSearchBookingQuery}
+            isBookingReferenceMode={isBookingReferenceQuery(searchBookingQuery)}
+            foundBookings={foundBookings}
+            foundClients={foundValidationClients}
+            loading={loadingValidationSearch}
+            resolvingQr={resolvingClientQr}
+            selectedBooking={selectedBookingDetails}
+            onSelectBooking={setSelectedBookingDetails}
+            onSelectClient={(client) =>
+              navigate(`/admin/dashboard/customers/${client.id}`)
+            }
+            onScan={handleValidationScan}
+            onScanStatusChange={setScanStatus}
+            validationState={validationState}
+            onValidateCash={handleValidateCash}
+            onCancelBooking={handleCancelBooking}
+            onPrintReceipt={handlePrintReceipt}
+            printingBookingId={printingBookingId}
+            getBookingClientName={getBookingClientName}
+          />
         ) : (
           <div className="space-y-6 p-3 sm:p-4 lg:p-6">
             <div className="glass-card p-6 sm:p-8 animate-fade-in-up">
@@ -1773,208 +1924,6 @@ export function AdminAssistantPage({
           </div>
         )}
 
-        {/* 3. VALIDATION & SCAN TAB */}
-        {activeTab === "validation" && (
-          <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
-            {/* WhatsApp Scanner */}
-            <div className="space-y-6 border-r border-sky-100 pr-0 lg:pr-8">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900">{t("qrScanner")}</h3>
-                <p className="text-xs text-slate-500">{t("cameraInstructions")}</p>
-              </div>
-
-              <WhatsAppQrScanner
-                onStatusChange={setScanStatus}
-                onScan={handleScan}
-              />
-            </div>
-
-            {/* Manual lookup and Details */}
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900">Validation Manuelle</h3>
-                <p className="text-xs text-slate-500">Recherchez par téléphone ou référence.</p>
-              </div>
-
-              <div className="relative">
-                <input
-                  type="text"
-                  value={searchBookingQuery}
-                  onChange={(e) => setSearchBookingQuery(e.target.value)}
-                  placeholder={t("searchBooking")}
-                  className="w-full rounded-2xl border border-sky-100 bg-sky-50/40 px-4 py-3.5 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:bg-white"
-                />
-              </div>
-
-              {loadingFoundBookings ? (
-                <div className="py-6 text-center text-slate-400">{t("loading")}</div>
-              ) : foundBookings.length > 0 ? (
-                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
-                  {foundBookings.map((b) => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => setSelectedBookingDetails(b)}
-                      className={`w-full text-left p-4 rounded-2xl border transition flex items-center justify-between hover:shadow-sm ${
-                        selectedBookingDetails?.id === b.id
-                          ? "border-sky-500 bg-sky-50/30"
-                          : "border-sky-50 bg-white"
-                      }`}
-                    >
-                      <div>
-                        <div className="font-bold text-slate-900 flex items-center gap-2">
-                          <span>{b.booking_reference}</span>
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                              b.status === "PAYE"
-                                ? "bg-emerald-100 text-emerald-800"
-                                : b.status === "ANNULE"
-                                ? "bg-rose-100 text-rose-800"
-                                : "bg-amber-100 text-amber-800"
-                            }`}
-                          >
-                            {b.status === "PAYE" ? "Payé" : b.status === "ANNULE" ? "Annulé" : "En attente"}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-1">
-                          Client: {b.user_phone} • Machine: {b.resource_label}
-                        </p>
-                      </div>
-                      <span className="text-sky-500 font-bold">→</span>
-                    </button>
-                  ))}
-                </div>
-              ) : searchBookingQuery.trim() ? (
-                <p className="text-center text-xs text-slate-400 py-6">{t("noBookingsFound")}</p>
-              ) : null}
-
-              {/* Selected Booking detail panel */}
-              {selectedBookingDetails && (
-                <div className="rounded-3xl border border-sky-100 bg-sky-50/40 p-5 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-bold text-slate-900 text-sm">
-                        Détails de {selectedBookingDetails.booking_reference}
-                      </h4>
-                      <p className="mt-1 text-xs font-semibold text-slate-500">
-                        {getBookingClientName(selectedBookingDetails)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedBookingDetails(null)}
-                      className="text-xs font-bold text-slate-400 hover:text-slate-600"
-                    >
-                      Fermer
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="bg-white p-3 rounded-xl border border-sky-50">
-                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[10px]">
-                        Client
-                      </span>
-                      <span className="font-bold text-slate-800 block mt-1">
-                        {getBookingClientName(selectedBookingDetails)}
-                      </span>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl border border-sky-50">
-                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[10px]">
-                        Téléphone
-                      </span>
-                      <span className="font-bold text-slate-800 block mt-1">
-                        {selectedBookingDetails.user_phone}
-                      </span>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl border border-sky-50">
-                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[10px]">
-                        Référence
-                      </span>
-                      <span className="font-bold text-slate-800 block mt-1">
-                        {selectedBookingDetails.booking_reference}
-                      </span>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl border border-sky-50">
-                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[10px]">
-                        Mode
-                      </span>
-                      <span className="font-bold text-slate-800 block mt-1">
-                        {selectedBookingDetails.resource_label}
-                      </span>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl border border-sky-50">
-                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[10px]">
-                        Date & Horaire
-                      </span>
-                      <span className="font-bold text-slate-800 block mt-1">
-                        {selectedBookingDetails.booking_date} (
-                        {selectedBookingDetails.start_time.slice(0, 5)} -{" "}
-                        {selectedBookingDetails.end_time.slice(0, 5)})
-                      </span>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl border border-sky-50">
-                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[10px]">
-                        Montant
-                      </span>
-                      <span className="font-bold text-slate-800 block mt-1">
-                        {selectedBookingDetails.total_price} DA
-                      </span>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl border border-sky-50 col-span-2">
-                      <span className="text-slate-400 block uppercase font-bold tracking-wider text-[10px]">
-                        Statut
-                      </span>
-                      <span className="font-bold text-slate-800 block mt-1">
-                        {selectedBookingDetails.status === "PAYE"
-                          ? "Payé"
-                          : selectedBookingDetails.status === "ANNULE"
-                            ? "Annulé"
-                            : "En attente"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Actions on booking */}
-                  <div className="flex gap-2 flex-wrap">
-                    {selectedBookingDetails.status === "EN_ATTENTE" && (
-                      <button
-                        type="button"
-                        onClick={() => handleValidateCash(selectedBookingDetails.id)}
-                        className="flex-1 min-w-[140px] rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 text-xs transition shadow-md shadow-emerald-100 cursor-pointer"
-                      >
-                        {t("paymentCash")}
-                      </button>
-                    )}
-
-                    {selectedBookingDetails.status !== "ANNULE" && (
-                      <button
-                        type="button"
-                        onClick={() => handleCancelBooking(selectedBookingDetails.id)}
-                        className="rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold py-3 px-4 text-xs transition cursor-pointer"
-                      >
-                        {t("cancelBooking")}
-                      </button>
-                    )}
-
-                    {selectedBookingDetails.status === "PAYE" && (
-                      <button
-                        type="button"
-                        disabled={printingBookingId !== null}
-                        onClick={() => handlePrintReceipt(selectedBookingDetails.id)}
-                        className="flex-1 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 text-xs transition cursor-pointer"
-                      >
-                        {printingBookingId === selectedBookingDetails.id
-                          ? "Impression..."
-                          : "Imprimer Ticket"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* 4. MACHINES TAB */}
         {activeTab === "machines" && (
           <div className="space-y-6">
@@ -2111,92 +2060,6 @@ export function AdminAssistantPage({
             </div>
 
 
-          {selectedBookingDetails && (
-            <div
-              className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
-              role="presentation"
-              onClick={() => setSelectedBookingDetails(null)}
-            >
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-label="Détails du rendez-vous"
-                onClick={(event) => event.stopPropagation()}
-                className="w-full max-w-3xl overflow-hidden rounded-[2rem] border border-sky-100 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.24)]"
-              >
-                <div className="bg-gradient-to-r from-sky-500 via-cyan-500 to-blue-600 px-6 py-5 text-white sm:px-7">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[11px] font-black uppercase tracking-[0.35em] text-white/80">
-                        Détails du rendez-vous
-                      </p>
-                      <h3 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">
-                        {getBookingClientName(selectedBookingDetails)}
-                      </h3>
-                      <p className="mt-1 text-sm font-semibold text-white/80">
-                        {selectedBookingDetails.booking_reference}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedBookingDetails(null)}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/15 text-white transition hover:bg-white/25"
-                      aria-label="Fermer"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 px-6 py-6 sm:grid-cols-2 sm:px-7">
-                  <div className="rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Client</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{getBookingClientName(selectedBookingDetails)}</p>
-                  </div>
-
-                  <div className="rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Téléphone</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{selectedBookingDetails.user_phone}</p>
-                  </div>
-
-                  <div className="rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Référence</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{selectedBookingDetails.booking_reference}</p>
-                  </div>
-
-                  <div className="rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Mode / Poste</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{selectedBookingDetails.resource_label}</p>
-                  </div>
-
-                  <div className="rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Date</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{selectedBookingDetails.booking_date}</p>
-                  </div>
-
-                  <div className="rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Horaire</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{`${selectedBookingDetails.start_time.slice(0, 5)} - ${selectedBookingDetails.end_time.slice(0, 5)}`}</p>
-                  </div>
-
-                  <div className="rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Montant</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{`${selectedBookingDetails.total_price} DA`}</p>
-                  </div>
-
-                  <div className="rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Statut</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{selectedBookingDetails.status === "PAYE" ? "Payé" : selectedBookingDetails.status === "ANNULE" ? "Annulé" : "En attente"}</p>
-                  </div>
-
-                  <div className="sm:col-span-2 rounded-[1.5rem] border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.06)] border-sky-100 bg-sky-50/70 text-sky-700">
-                    <p className="text-[11px] font-black uppercase tracking-[0.3em] opacity-80">Validé par</p>
-                    <p className="mt-2 text-lg font-black leading-snug text-slate-900">{selectedBookingDetails.validated_by_phone || "-"}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
             {/* Quick Register New Client Panel (Toggle inside Modal) */}
             {quickCreateOpen ? (
               <form onSubmit={handleQuickCreateClient} className="space-y-4">

@@ -282,6 +282,11 @@ class Booking(models.Model):
         related_name="validated_bookings",
         verbose_name="Validé par",
     )
+    whatsapp_reminder_sent_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Rappel WhatsApp envoyé le",
+    )
 
     class Meta:
         verbose_name = "Réservation"

@@ -17,6 +17,11 @@ from .views import (
     SuperAdminStatsAPIView,
     SystemConfigAPIView,
 )
+from .whatsapp_internal_views import (
+    WhatsAppReminderMarkSentAPIView,
+    WhatsAppReminderSendAPIView,
+    WhatsAppRemindersDueAPIView,
+)
 
 router = DefaultRouter()
 router.register(r"users", CustomUserViewSet, basename="user")
@@ -41,6 +46,21 @@ superadmin_router.register(
 urlpatterns = [
     path("auth/login/", CustomerLoginAPIView.as_view(), name="auth-login"),
     path("auth/staff/login/", StaffLoginAPIView.as_view(), name="auth-staff-login"),
+    path(
+        "internal/whatsapp/reminders-due/",
+        WhatsAppRemindersDueAPIView.as_view(),
+        name="whatsapp-reminders-due",
+    ),
+    path(
+        "internal/whatsapp/reminders/<int:booking_id>/mark-sent/",
+        WhatsAppReminderMarkSentAPIView.as_view(),
+        name="whatsapp-reminder-mark-sent",
+    ),
+    path(
+        "internal/whatsapp/reminders/<int:booking_id>/send/",
+        WhatsAppReminderSendAPIView.as_view(),
+        name="whatsapp-reminder-send",
+    ),
     path("", include(router.urls)),
     path("superadmin/", include(superadmin_router.urls)),
     path(
