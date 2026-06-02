@@ -101,7 +101,7 @@ type Booking = {
   booking_date: string;
   start_time: string;
   end_time: string;
-  status: "EN_ATTENTE" | "PAYE" | "ANNULE";
+  status: "EN_ATTENTE" | "PAYE" | "ANNULE" | "MAINTENANCE";
   total_price: string;
   validated_by_phone?: string;
   validated_at?: string;
@@ -221,6 +221,7 @@ export function AdminAssistantPage({
   const validationQrHandledRef = useRef(false);
 
   // Tab 3: Calendar State
+  const calendarScrollRef = useRef<HTMLDivElement | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
     // Format YYYY-MM-DD in local timezone
@@ -234,12 +235,27 @@ export function AdminAssistantPage({
   const [loadingCalendar, setLoadingCalendar] = useState(false);
 
   // Manual booking creation
+  // Mobile calendar: which resource column is shown on small screens
+  const [mobileSelectedResourceId, setMobileSelectedResourceId] = useState<number | null>(null);
+  const [isSmallScreen, setIsSmallScreen] = useState(() => window.innerWidth < 1024);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const handler = (e: MediaQueryListEvent) => setIsSmallScreen(e.matches);
+    mq.addEventListener("change", handler);
+    setIsSmallScreen(mq.matches);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
   const [selectedSlotForBooking, setSelectedSlotForBooking] = useState<{
     resource: Resource;
     time: string;
   } | null>(null);
+  const [bookingType, setBookingType] = useState<"appointment" | "maintenance" | null>(null);
   const [selectedClientForBooking, setSelectedClientForBooking] = useState<Customer | null>(null);
   const [bookingDuration, setBookingDuration] = useState<15 | 30 | 60>(30);
+  const [selectedWashMode, setSelectedWashMode] = useState<"rapid" | "express" | "premium" | "vip">("express");
+  const [maintenanceDuration, setMaintenanceDuration] = useState<number>(15);
+  const [paymentStatus, setPaymentStatus] = useState<"EN_ATTENTE" | "PAYE">("EN_ATTENTE");
   const [searchClientForBooking, setSearchClientForBooking] = useState("");
   const [clientsForBookingResults, setClientsForBookingResults] = useState<Customer[]>([]);
   const [submittingBooking, setSubmittingBooking] = useState(false);
@@ -249,6 +265,7 @@ export function AdminAssistantPage({
   const [quickLastName, setQuickLastName] = useState("");
   const [quickFirstName, setQuickFirstName] = useState("");
   const [quickPhone, setQuickPhone] = useState("");
+  const [quickSecretCode, setQuickSecretCode] = useState("");
   const [quickSubmitting, setQuickSubmitting] = useState(false);
 
   // Tab 2: Validation & Scan State
@@ -408,6 +425,10 @@ export function AdminAssistantPage({
           const bookData = await bookRes.json();
           setResources(resData);
           setBookings(bookData);
+          // Auto-select first resource for mobile if none chosen yet
+          if (resData.length > 0) {
+            setMobileSelectedResourceId((prev) => prev ?? resData[0].id);
+          }
         }
       } catch (err) {
         console.error(err);
@@ -420,6 +441,24 @@ export function AdminAssistantPage({
       active = false;
     };
   }, [estId, selectedDate, refreshCounter]);
+
+  // Auto-scroll calendar: today → current time, other dates → top (08:00)
+  useEffect(() => {
+    if (loadingCalendar || activeTab !== "calendar") return;
+    const el = calendarScrollRef.current;
+    if (!el) return;
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const ROW_HEIGHT = 88;
+    if (selectedDate === todayKey) {
+      const nowMins = now.getHours() * 60 + now.getMinutes();
+      const targetMins = Math.max(CALENDAR_START_MINUTES, Math.floor((nowMins - 15) / 15) * 15);
+      const rowIndex = Math.floor((targetMins - CALENDAR_START_MINUTES) / CALENDAR_STEP_MINUTES);
+      el.scrollTop = rowIndex * ROW_HEIGHT;
+    } else {
+      el.scrollTop = 0;
+    }
+  }, [loadingCalendar, activeTab, selectedDate]);
 
   // Clients Tab search effect
   useEffect(() => {
@@ -796,8 +835,17 @@ export function AdminAssistantPage({
 
     setSubmittingBooking(true);
     try {
+      // Calculate duration based on wash mode
+      const modeDuration =
+        selectedWashMode === "rapid" ? 15 :
+        selectedWashMode === "express" ? 30 :
+        selectedWashMode === "premium" ? 45 :
+        selectedWashMode === "vip" ? 60 : 30;
+
+      const totalPrice = modeDuration * 15;
+
       const startTime = selectedSlotForBooking.time;
-      const endTime = addMinutesToTime(startTime, bookingDuration);
+      const endTime = addMinutesToTime(startTime, modeDuration);
 
       const payload = {
         resource: selectedSlotForBooking.resource.id,
@@ -805,7 +853,9 @@ export function AdminAssistantPage({
         booking_date: selectedDate,
         start_time: startTime,
         end_time: endTime,
-        status: "PAYE", // manually validation implies payment on-site
+        status: paymentStatus,
+        total_price: String(totalPrice),
+        payment_method: "CASH",
       };
 
       const res = await fetch("/api/bookings/", {
@@ -821,12 +871,13 @@ export function AdminAssistantPage({
         const createdBooking = await res.json();
         showSuccess(t("bookingSuccess"));
         setSelectedSlotForBooking(null);
+        setBookingType(null);
         setSelectedClientForBooking(null);
         setSearchClientForBooking("");
+        setSelectedWashMode("express");
+        setPaymentStatus("EN_ATTENTE");
         triggerRefresh();
 
-        // Print receipt immediately
-        handlePrintReceipt(createdBooking.id);
       } else {
         const errData = await res.json();
         showError(errData.detail || errData.resource?.[0] || t("bookingError"));
@@ -838,10 +889,62 @@ export function AdminAssistantPage({
     }
   };
 
+  // Save Maintenance Booking
+  const handleSaveMaintenanceBooking = async () => {
+    if (!selectedSlotForBooking) {
+      showError("Aucun créneau sélectionné");
+      return;
+    }
+
+    setSubmittingBooking(true);
+    try {
+      const startTime = selectedSlotForBooking.time;
+      const endTime = addMinutesToTime(startTime, maintenanceDuration);
+
+      // For maintenance, we need to create a "system" user or use a specific maintenance status
+      // Since the API expects a user, we'll use status "MAINTENANCE" or create with a special note
+      const payload = {
+        resource: selectedSlotForBooking.resource.id,
+        user: null, // Maintenance doesn't need a user
+        booking_date: selectedDate,
+        start_time: startTime,
+        end_time: endTime,
+        status: "MAINTENANCE", // Special status for maintenance
+        total_price: "0",
+        payment_method: "CASH",
+        notes: `Maintenance - Durée: ${maintenanceDuration} minutes`,
+      };
+
+      const res = await fetch("/api/bookings/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeader(),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        showSuccess("Maintenance créée avec succès");
+        setSelectedSlotForBooking(null);
+        setBookingType(null);
+        setMaintenanceDuration(15);
+        triggerRefresh();
+      } else {
+        const errData = await res.json();
+        showError(errData.detail || errData.resource?.[0] || "Erreur lors de la création de la maintenance");
+      }
+    } catch (err) {
+      showError("Erreur lors de la création de la maintenance");
+    } finally {
+      setSubmittingBooking(false);
+    }
+  };
+
   // Register client inside booking modal
   const handleQuickCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    const secret = String(Math.floor(100000 + Math.random() * 900000));
+    const secret = quickSecretCode || String(Math.floor(100000 + Math.random() * 900000));
     const validationError = validateAdminCustomerForm(
       {
         firstName: quickFirstName,
@@ -1736,24 +1839,42 @@ export function AdminAssistantPage({
               </div>
             ) : (
               <div className="overflow-hidden rounded-[2rem] border border-sky-100 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-                <div className="max-h-[calc(100vh-320px)] overflow-auto">
-                  <table className="min-w-[980px] w-full border-separate border-spacing-0 text-left text-sm">
+
+                {/* ── Mobile resource tab bar (hidden on lg+) ── */}
+                <div className="flex gap-2 overflow-x-auto border-b border-sky-100 bg-sky-50/60 px-3 py-2 lg:hidden">
+                  {resources.map((res) => (
+                    <button
+                      key={res.id}
+                      type="button"
+                      onClick={() => setMobileSelectedResourceId(res.id)}
+                      className={`shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold transition whitespace-nowrap ${
+                        mobileSelectedResourceId === res.id
+                          ? "bg-sky-600 text-white shadow"
+                          : "bg-white text-slate-600 border border-sky-100 hover:bg-sky-50"
+                      }`}
+                    >
+                      {res.label}
+                      {res.status === "EN_PANNE" && <span className="ml-1 text-[10px] text-rose-400">⚠</span>}
+                    </button>
+                  ))}
+                </div>
+
+                <div ref={calendarScrollRef} className="max-h-[calc(100vh-280px)] overflow-auto">
+                  <table className="w-full border-separate border-spacing-0 text-left text-sm lg:min-w-[980px]">
                     <thead className="sticky top-0 z-20 bg-white/95 backdrop-blur">
                       <tr className="border-b border-sky-100 bg-sky-50/70">
-                        <th className="sticky left-0 z-30 w-24 border-b border-sky-100 bg-sky-50/95 p-4 font-black text-slate-700 shadow-[8px_0_20px_rgba(15,23,42,0.04)]">
+                        <th className="sticky left-0 z-30 w-16 sm:w-24 border-b border-sky-100 bg-sky-50/95 p-2 sm:p-4 font-black text-slate-700 shadow-[8px_0_20px_rgba(15,23,42,0.04)]">
                           Heure
                         </th>
-                        {resources.map((res) => (
-                          <th key={res.id} className="min-w-[220px] border-b border-sky-100 p-4 text-center font-black text-slate-800">
+                        {resources
+                          .filter((res) => !isSmallScreen || mobileSelectedResourceId === null || res.id === mobileSelectedResourceId)
+                          .map((res) => (
+                          <th key={res.id} className="min-w-[160px] sm:min-w-[200px] lg:min-w-[220px] border-b border-sky-100 p-2 sm:p-4 text-center font-black text-slate-800">
                             <div className="flex flex-col items-center gap-1">
-                              <span>{res.label}</span>
-                              <span
-                                className={`rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-[0.18em] ${
-                                  res.status === "ACTIF"
-                                    ? "bg-emerald-100 text-emerald-800"
-                                    : "bg-rose-100 text-rose-800"
-                                }`}
-                              >
+                              <span className="text-xs sm:text-sm">{res.label}</span>
+                              <span className={`rounded-full px-2 py-0.5 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] ${
+                                res.status === "ACTIF" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                              }`}>
                                 {res.status === "ACTIF" ? "Actif" : "En panne"}
                               </span>
                             </div>
@@ -1762,21 +1883,24 @@ export function AdminAssistantPage({
                       </tr>
                     </thead>
                     <tbody>
-                      {slots.map((time, index) => {
+                      {slots.map((time) => {
                         const slotMins = toMinutes(time);
+                        const visibleResources = resources.filter(
+                          (res) => !isSmallScreen || mobileSelectedResourceId === null || res.id === mobileSelectedResourceId
+                        );
                         return (
-                          <tr key={time} className="group border-b border-sky-50/80 hover:bg-slate-50/40">
-                            <td className="sticky left-0 z-10 border-b border-sky-50 bg-white p-4 font-black text-slate-600 shadow-[8px_0_20px_rgba(15,23,42,0.04)]">
+                          <tr key={time} className="group border-b border-sky-50/80 hover:bg-slate-50/30">
+                            <td className="sticky left-0 z-10 border-b border-sky-50 bg-white p-2 sm:p-4 font-black text-slate-600 shadow-[8px_0_20px_rgba(15,23,42,0.04)]">
                               <div className="flex flex-col">
-                                <span className="text-sm">{time}</span>
-                                <span className="text-[10px] font-semibold text-slate-400">15 min</span>
+                                <span className="text-xs sm:text-sm">{time}</span>
+                                <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 hidden sm:block">15 min</span>
                               </div>
                             </td>
-                            {resources.map((res) => {
+                            {visibleResources.map((res) => {
                               if (res.status === "EN_PANNE") {
                                 return (
-                                  <td key={res.id} className="border-b border-sky-50 bg-rose-50/20 p-2">
-                                    <div className="flex h-full min-h-[64px] items-center justify-center rounded-[1.25rem] border border-rose-100 bg-rose-50/50 px-3 text-xs font-bold text-rose-700">
+                                  <td key={res.id} className="border-b border-sky-50 bg-rose-50/20 p-1.5 sm:p-2">
+                                    <div className="flex h-full min-h-[56px] items-center justify-center rounded-xl sm:rounded-[1.25rem] border border-rose-100 bg-rose-50/50 px-2 text-[11px] font-bold text-rose-700">
                                       Hors service
                                     </div>
                                   </td>
@@ -1784,22 +1908,31 @@ export function AdminAssistantPage({
                               }
 
                               const activeBooking = bookings.find((booking) => {
-                                if (booking.status === "ANNULE") {
-                                  return false;
-                                }
-                                if (booking.resource !== res.id) {
-                                  return false;
-                                }
+                                if (booking.status === "ANNULE") return false;
+                                if (booking.resource !== res.id) return false;
                                 const bookingStart = toMinutes(booking.start_time);
                                 const bookingEnd = toMinutes(booking.end_time);
                                 return overlapsSlot(bookingStart, bookingEnd, slotMins, slotMins + CALENDAR_STEP_MINUTES);
                               });
 
                               if (activeBooking) {
+                                const bookingStart = toMinutes(activeBooking.start_time);
+                                if (bookingStart < slotMins) return null;
+
+                                const bookingEnd = toMinutes(activeBooking.end_time);
+                                const durationSlots = Math.max(1, Math.round((bookingEnd - bookingStart) / CALENDAR_STEP_MINUTES));
+                                const isMaintenance = activeBooking.status === "MAINTENANCE";
                                 const isPaid = activeBooking.status === "PAYE";
                                 const isCurrent = selectedBookingDetails?.id === activeBooking.id;
+                                const durationMin = bookingEnd - bookingStart;
+
                                 return (
-                                  <td key={res.id} className="border-b border-sky-50 p-2">
+                                  <td
+                                    key={res.id}
+                                    rowSpan={durationSlots}
+                                    className="border-b border-sky-50 p-1.5 sm:p-2 align-top"
+                                    style={{ height: "1px" }}
+                                  >
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -1807,31 +1940,63 @@ export function AdminAssistantPage({
                                           state: { booking: activeBooking, returnTo: location.pathname },
                                         });
                                       }}
-                                      className={`group/slot flex h-full min-h-[64px] w-full cursor-pointer flex-col justify-between rounded-[1.25rem] border p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(15,23,42,0.08)] focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-white ${
-                                        isPaid
-                                          ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                                          : "border-amber-200 bg-amber-50 text-amber-900"
-                                      } ${isCurrent ? "ring-2 ring-sky-400 ring-offset-2 ring-offset-white" : ""}`}
+                                      className={`group/slot relative flex w-full cursor-pointer flex-col overflow-hidden rounded-xl sm:rounded-2xl border text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_40px_rgba(15,23,42,0.12)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white ${
+                                        isMaintenance
+                                          ? "border-rose-300/70 bg-gradient-to-br from-rose-50 to-orange-50/60 text-rose-900 shadow-[0_4px_16px_rgba(239,68,68,0.12)] focus:ring-rose-400"
+                                          : isPaid
+                                            ? "border-emerald-200/70 bg-gradient-to-br from-emerald-50 to-teal-50/60 text-emerald-900 shadow-[0_4px_16px_rgba(16,185,129,0.10)] focus:ring-sky-400"
+                                            : "border-amber-200/70 bg-gradient-to-br from-amber-50 to-orange-50/60 text-amber-900 shadow-[0_4px_16px_rgba(245,158,11,0.10)] focus:ring-sky-400"
+                                      } ${isCurrent ? "ring-2 ring-sky-400 ring-offset-2" : ""}`}
+                                      style={{ height: "100%", minHeight: `${durationSlots * 56}px` }}
                                     >
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <p className="truncate text-sm font-black">{getBookingClientName(activeBooking)}</p>
-                                          <p className="mt-0.5 truncate text-[11px] font-semibold opacity-80">
-                                            {activeBooking.user_phone}
-                                          </p>
-                                          <p className="mt-0.5 truncate text-[11px] font-semibold opacity-70">
-                                            {activeBooking.booking_reference}
-                                          </p>
+                                      {/* Left accent bar */}
+                                      <div className={`absolute left-0 top-0 h-full w-1 rounded-l-xl sm:rounded-l-2xl ${
+                                        isMaintenance ? "bg-rose-500" : isPaid ? "bg-emerald-500" : "bg-amber-400"
+                                      }`} />
+
+                                      <div className="flex h-full flex-col justify-between p-2 sm:p-3 pl-3 sm:pl-4">
+                                        <div>
+                                          <div className="flex items-start justify-between gap-1.5">
+                                            {isMaintenance ? (
+                                              <div className="flex items-center gap-1.5 min-w-0">
+                                                <svg className="w-3 h-3 shrink-0 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                </svg>
+                                                <p className="truncate text-xs sm:text-sm font-black leading-tight text-rose-800">Maintenance</p>
+                                              </div>
+                                            ) : (
+                                              <p className="truncate text-xs sm:text-sm font-black leading-tight">{getBookingClientName(activeBooking)}</p>
+                                            )}
+                                            <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] sm:text-[9px] font-black uppercase tracking-[0.15em] ${
+                                              isMaintenance ? "bg-rose-100 text-rose-700"
+                                              : isPaid ? "bg-emerald-100 text-emerald-700"
+                                              : "bg-amber-100 text-amber-700"
+                                            }`}>
+                                              {isMaintenance ? "Maint." : isPaid ? "Payé" : "Attente"}
+                                            </span>
+                                          </div>
+                                          {durationSlots >= 2 && !isMaintenance && (
+                                            <p className="mt-0.5 truncate text-[10px] sm:text-[11px] font-semibold opacity-70">
+                                              {activeBooking.user_phone}
+                                            </p>
+                                          )}
+                                          {durationSlots >= 3 && (
+                                            <p className="mt-0.5 truncate font-mono text-[9px] sm:text-[10px] opacity-60">
+                                              {activeBooking.booking_reference}
+                                            </p>
+                                          )}
                                         </div>
-                                        <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-[0.16em] ${
-                                          isPaid ? "bg-white text-emerald-700" : "bg-white text-amber-700"
-                                        }`}>
-                                          {isPaid ? "Payé" : "En attente"}
-                                        </span>
-                                      </div>
-                                      <div className="mt-2 flex items-center justify-between gap-2 text-[11px] font-semibold opacity-80">
-                                        <span>{activeBooking.start_time.slice(0, 5)} - {activeBooking.end_time.slice(0, 5)}</span>
-                                        <span>{activeBooking.total_price} DA</span>
+                                        <div className={`flex items-center justify-between gap-1 text-[9px] sm:text-[10px] font-semibold opacity-75 ${durationSlots >= 2 ? "mt-2" : "mt-1"}`}>
+                                          <span className="flex items-center gap-0.5 sm:gap-1">
+                                            <span>{activeBooking.start_time.slice(0, 5)}</span>
+                                            <span className="opacity-50">→</span>
+                                            <span>{activeBooking.end_time.slice(0, 5)}</span>
+                                            <span className="opacity-40 hidden sm:inline">({durationMin}m)</span>
+                                          </span>
+                                          {durationSlots >= 2 && !isMaintenance && (
+                                            <span className="font-black">{activeBooking.total_price} DA</span>
+                                          )}
+                                        </div>
                                       </div>
                                     </button>
                                   </td>
@@ -1839,15 +2004,13 @@ export function AdminAssistantPage({
                               }
 
                               return (
-                                <td key={res.id} className="border-b border-sky-50 p-2">
+                                <td key={res.id} className="border-b border-sky-50 p-1.5 sm:p-2">
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      setSelectedSlotForBooking({ resource: res, time })
-                                    }
-                                    className="group flex h-full min-h-[64px] w-full cursor-pointer items-center justify-center rounded-[1.25rem] border border-dashed border-emerald-200 bg-emerald-50/20 px-3 text-sm font-black text-emerald-700 transition duration-200 hover:-translate-y-0.5 hover:bg-emerald-50/60 hover:shadow-[0_16px_32px_rgba(16,185,129,0.10)] focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white"
+                                    onClick={() => setSelectedSlotForBooking({ resource: res, time })}
+                                    className="group flex h-full min-h-[56px] sm:min-h-[72px] w-full cursor-pointer items-center justify-center rounded-xl sm:rounded-[1.25rem] border border-dashed border-sky-200/60 bg-sky-50/10 px-2 text-xs sm:text-sm font-bold text-sky-400/70 transition duration-200 hover:border-emerald-300 hover:bg-emerald-50/40 hover:text-emerald-700 hover:shadow-[0_8px_24px_rgba(16,185,129,0.08)] focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white"
                                   >
-                                    <span className="transition group-hover:scale-[1.02]">+ Réserver</span>
+                                    <span className="transition group-hover:scale-105">+ Réserver</span>
                                   </button>
                                 </td>
                               );
@@ -2034,205 +2197,468 @@ export function AdminAssistantPage({
       )}
 
       {/* ── Manual Booking Creation Modal ── */}
-      {selectedSlotForBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-[2rem] border border-sky-100 bg-white p-6 shadow-2xl text-slate-900">
-            <div className="flex items-center justify-between border-b border-sky-50 pb-4 mb-4">
-              <div>
-                <h4 className="text-lg font-bold text-slate-900">Nouvelle Réservation Manuelle</h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {selectedSlotForBooking.resource.label} • {selectedSlotForBooking.time} •{" "}
-                  {selectedDate}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedSlotForBooking(null);
-                  setSelectedClientForBooking(null);
-                  setSearchClientForBooking("");
-                  setQuickCreateOpen(false);
-                }}
-                className="text-slate-400 hover:text-slate-600 text-xl font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
+      {selectedSlotForBooking && (() => {
+        // ── Conflict detection helpers (computed inline so they're always fresh) ──
+        const slotStart = selectedSlotForBooking.time;
+        const resId = selectedSlotForBooking.resource.id;
 
+        // Duration of chosen wash mode in minutes
+        const washModeDuration =
+          selectedWashMode === "rapid" ? 15 :
+          selectedWashMode === "express" ? 30 :
+          selectedWashMode === "premium" ? 45 : 60;
 
-            {/* Quick Register New Client Panel (Toggle inside Modal) */}
-            {quickCreateOpen ? (
-              <form onSubmit={handleQuickCreateClient} className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h5 className="font-bold text-slate-800 text-xs uppercase tracking-wider">
-                    Création rapide client
-                  </h5>
-                  <button
-                    type="button"
-                    onClick={() => setQuickCreateOpen(false)}
-                    className="text-xs text-sky-600 hover:underline cursor-pointer"
-                  >
-                    Retour à la recherche
-                  </button>
-                </div>
+        const appointmentEnd = addMinutesToTime(slotStart, washModeDuration);
+        const maintenanceEnd = addMinutesToTime(slotStart, maintenanceDuration);
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block text-xs font-semibold text-slate-600">
-                    Nom
-                    <input
-                      type="text"
-                      required
-                      value={quickLastName}
-                      onChange={(e) => setQuickLastName(e.target.value)}
-                      className="w-full mt-1 rounded-xl border border-sky-50 bg-sky-50/40 px-3 py-2 text-slate-900 outline-none"
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold text-slate-600">
-                    Prénom
-                    <input
-                      type="text"
-                      required
-                      value={quickFirstName}
-                      onChange={(e) => setQuickFirstName(e.target.value)}
-                      className="w-full mt-1 rounded-xl border border-sky-50 bg-sky-50/40 px-3 py-2 text-slate-900 outline-none"
-                    />
-                  </label>
-                </div>
-                <label className="block text-xs font-semibold text-slate-600">
-                  Téléphone
-                  <input
-                    type="text"
-                    required
-                    value={quickPhone}
-                    onChange={(e) => setQuickPhone(e.target.value)}
-                    className="w-full mt-1 rounded-xl border border-sky-50 bg-sky-50/40 px-3 py-2 text-slate-900 outline-none"
-                  />
-                </label>
+        const conflictsForAppointment = bookings.filter((b) => {
+          if (b.status === "ANNULE") return false;
+          if (b.resource !== resId) return false;
+          return overlapsSlot(toMinutes(b.start_time), toMinutes(b.end_time), toMinutes(slotStart), toMinutes(appointmentEnd));
+        });
 
-                <button
-                  type="submit"
-                  disabled={quickSubmitting}
-                  className="w-full rounded-2xl bg-sky-600 text-white font-bold py-2.5 text-xs transition cursor-pointer"
-                >
-                  {quickSubmitting ? "Création..." : "Créer le client"}
-                </button>
-              </form>
-            ) : (
-              <div className="space-y-4">
-                {/* Client Selection */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    {t("selectClientForBooking")}
-                  </label>
-                  {selectedClientForBooking ? (
-                    <div className="mt-2 flex items-center justify-between p-3 rounded-2xl bg-emerald-50 border border-emerald-100">
-                      <div>
-                        <p className="font-bold text-emerald-950 text-sm">
-                          {selectedClientForBooking.first_name} {selectedClientForBooking.last_name}
-                        </p>
-                        <p className="text-xs text-emerald-800">{selectedClientForBooking.phone}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedClientForBooking(null)}
-                        className="text-xs font-bold text-sky-700 hover:underline cursor-pointer"
-                      >
-                        Modifier
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex gap-2 items-center mt-2">
-                        <input
-                          type="text"
-                          value={searchClientForBooking}
-                          onChange={(e) => setSearchClientForBooking(e.target.value)}
-                          placeholder="Rechercher par nom ou numéro..."
-                          className="w-full rounded-2xl border border-sky-50 bg-sky-50/40 px-4 py-2.5 text-xs outline-none focus:bg-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setQuickCreateOpen(true)}
-                          className="rounded-2xl border border-sky-100 bg-sky-50 px-3 py-2.5 text-xs font-bold text-sky-700 hover:bg-sky-100 transition whitespace-nowrap cursor-pointer"
-                        >
-                          + Nouveau
-                        </button>
-                      </div>
+        const conflictsForMaintenance = bookings.filter((b) => {
+          if (b.status === "ANNULE") return false;
+          if (b.resource !== resId) return false;
+          return overlapsSlot(toMinutes(b.start_time), toMinutes(b.end_time), toMinutes(slotStart), toMinutes(maintenanceEnd));
+        });
 
-                      {/* Dropdown list of results */}
-                      {searchClientForBooking && (
-                        <div className="border border-sky-50 rounded-2xl bg-white max-h-[150px] overflow-y-auto divide-y divide-sky-50 shadow-sm text-xs">
-                          {clientsForBookingResults.length === 0 ? (
-                            <p className="p-3 text-slate-400 text-center">Aucun client trouvé.</p>
-                          ) : (
-                            clientsForBookingResults.map((c) => (
-                              <button
-                                key={c.id}
-                                type="button"
-                                onClick={() => setSelectedClientForBooking(c)}
-                                className="w-full text-left p-3 hover:bg-sky-50/50 transition flex justify-between items-center cursor-pointer"
-                              >
-                                <span className="font-bold text-slate-800">
-                                  {c.first_name} {c.last_name}
-                                </span>
-                                <span className="text-slate-400 font-semibold">{c.phone}</span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+        const washModes = [
+          { key: "rapid" as const,   label: "Rapide",   duration: 15, price: 225, accent: "from-cyan-400 to-sky-500",     ring: "ring-cyan-400",   bg: "bg-cyan-50",   border: "border-cyan-300",   text: "text-cyan-700" },
+          { key: "express" as const, label: "Express",  duration: 30, price: 450, accent: "from-sky-500 to-blue-600",     ring: "ring-sky-500",    bg: "bg-sky-50",    border: "border-sky-400",    text: "text-sky-700" },
+          { key: "premium" as const, label: "Premium",  duration: 45, price: 675, accent: "from-blue-500 to-indigo-600",  ring: "ring-blue-500",   bg: "bg-blue-50",   border: "border-blue-400",   text: "text-blue-700" },
+          { key: "vip" as const,     label: "VIP",      duration: 60, price: 900, accent: "from-violet-500 to-purple-600",ring: "ring-violet-500", bg: "bg-violet-50", border: "border-violet-400", text: "text-violet-700" },
+        ];
+        const selectedMode = washModes.find((m) => m.key === selectedWashMode)!;
 
-                {/* Duration */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    {t("durationLabel")}
-                  </label>
-                  <div className="grid grid-cols-3 gap-2 mt-2">
-                    {([15, 30, 60] as const).map((dur) => (
-                      <button
-                        key={dur}
-                        type="button"
-                        onClick={() => setBookingDuration(dur)}
-                        className={`rounded-2xl border py-2.5 text-xs font-bold transition ${
-                          bookingDuration === dur
-                            ? "border-sky-600 bg-sky-600 text-white"
-                            : "border-sky-50 bg-sky-50/30 text-slate-600 hover:bg-sky-50"
-                        }`}
-                      >
-                        {dur} min
-                      </button>
-                    ))}
+        const closeModal = () => {
+          setSelectedSlotForBooking(null);
+          setBookingType(null);
+          setSelectedClientForBooking(null);
+          setSearchClientForBooking("");
+          setQuickCreateOpen(false);
+          setQuickLastName("");
+          setQuickFirstName("");
+          setQuickPhone("");
+          setQuickSecretCode("");
+          setSelectedWashMode("express");
+          setMaintenanceDuration(15);
+          setPaymentStatus("EN_ATTENTE");
+        };
+
+        const dateLabel = new Date(selectedDate + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+
+        return (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in"
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+        >
+          <div className="w-full max-w-lg sm:rounded-3xl bg-white shadow-[0_40px_120px_rgba(0,0,0,0.28)] text-slate-900 max-h-[96dvh] overflow-hidden flex flex-col rounded-t-3xl">
+
+            {/* ── Header ── */}
+            <div className={`relative overflow-hidden px-6 py-5 ${
+              bookingType === "maintenance"
+                ? "bg-gradient-to-br from-orange-500 via-amber-500 to-yellow-400"
+                : "bg-gradient-to-br from-sky-500 via-blue-500 to-indigo-600"
+            }`}>
+              {/* subtle dot pattern */}
+              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "radial-gradient(circle, white 1px, transparent 1px)", backgroundSize: "20px 20px" }} />
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/70 mb-1">
+                    {bookingType === null ? "Nouvelle réservation" : bookingType === "appointment" ? "Rendez-vous client" : "Maintenance"}
+                  </p>
+                  <h4 className="text-xl font-black text-white leading-tight">
+                    {bookingType === null && "Que souhaitez-vous créer ?"}
+                    {bookingType === "appointment" && !quickCreateOpen && "Configurer le rendez-vous"}
+                    {bookingType === "appointment" && quickCreateOpen && "Nouveau client"}
+                    {bookingType === "maintenance" && "Planifier une maintenance"}
+                  </h4>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/85 font-semibold">
+                    <span className="flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                      </svg>
+                      {selectedSlotForBooking.resource.label}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span className="flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      {slotStart}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span className="capitalize">{dateLabel}</span>
                   </div>
                 </div>
-
-                {/* Pricing Summary */}
-                <div className="bg-sky-50/40 border border-sky-100 p-4 rounded-2xl text-xs flex justify-between items-center">
-                  <div>
-                    <span className="text-slate-500 font-bold block">Prix total</span>
-                    <span className="text-slate-400 mt-0.5 block font-medium">Tarif: 15 DA / min</span>
-                  </div>
-                  <span className="text-lg font-extrabold text-slate-900">
-                    {bookingDuration * 15} DA
-                  </span>
-                </div>
-
-                {/* Submit */}
                 <button
                   type="button"
-                  disabled={submittingBooking || !selectedClientForBooking}
-                  onClick={handleSaveManualBooking}
-                  className="w-full rounded-2xl bg-sky-600 hover:bg-sky-500 text-white font-bold py-3.5 text-xs transition shadow-lg shadow-sky-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  onClick={closeModal}
+                  className="shrink-0 flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white hover:bg-white/30 transition"
                 >
-                  {submittingBooking ? "Enregistrement..." : t("saveBooking")}
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* ── Scrollable body ── */}
+            <div className="flex-1 overflow-y-auto">
+
+              {/* ── STEP 0: Choose type ── */}
+              {bookingType === null && (
+                <div className="p-6 space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => setBookingType("appointment")}
+                    className="group w-full rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50 to-blue-50/60 p-5 text-left transition hover:border-sky-300 hover:shadow-[0_8px_30px_rgba(14,165,233,0.14)] hover:-translate-y-0.5"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 shadow-[0_4px_12px_rgba(14,165,233,0.35)]">
+                        <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-black text-slate-900 text-base">Rendez-vous Client</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Créer une réservation pour un client existant ou nouveau</p>
+                      </div>
+                      <svg className="w-5 h-5 text-sky-400 ml-auto shrink-0 transition group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBookingType("maintenance")}
+                    className="group w-full rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-orange-50/60 p-5 text-left transition hover:border-amber-300 hover:shadow-[0_8px_30px_rgba(245,158,11,0.14)] hover:-translate-y-0.5"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 shadow-[0_4px_12px_rgba(245,158,11,0.35)]">
+                        <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-black text-slate-900 text-base">Maintenance</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Bloquer le poste pour maintenance ou entretien</p>
+                      </div>
+                      <svg className="w-5 h-5 text-amber-400 ml-auto shrink-0 transition group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              {/* ── STEP 1b: Quick client creation ── */}
+              {bookingType === "appointment" && quickCreateOpen && (
+                <form onSubmit={handleQuickCreateClient} className="p-6 space-y-5">
+                  <button type="button" onClick={() => setQuickCreateOpen(false)} className="flex items-center gap-1.5 text-xs font-bold text-sky-600 hover:text-sky-800 transition">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                    Retour à la recherche
+                  </button>
+
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 space-y-3">
+                    <p className="text-xs font-black text-slate-700 uppercase tracking-wider">Informations du client</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Nom</label>
+                        <input type="text" required value={quickLastName} onChange={(e) => setQuickLastName(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 transition" />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Prénom</label>
+                        <input type="text" required value={quickFirstName} onChange={(e) => setQuickFirstName(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 transition" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Téléphone</label>
+                      <input type="text" required value={quickPhone} onChange={(e) => setQuickPhone(e.target.value)} placeholder="0555 123 456"
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 transition" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Code secret (6 chiffres)</label>
+                      <div className="mt-1 flex gap-2">
+                        <input type="text" required value={quickSecretCode} onChange={(e) => setQuickSecretCode(e.target.value)} placeholder="123456" maxLength={6} pattern="\d{6}"
+                          className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-mono text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 transition" />
+                        <button type="button" onClick={() => setQuickSecretCode(String(Math.floor(100000 + Math.random() * 900000)))}
+                          className="rounded-xl bg-sky-100 px-3 py-2 text-xs font-bold text-sky-700 hover:bg-sky-200 transition">
+                          Générer
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button type="submit" disabled={quickSubmitting}
+                    className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 py-3.5 text-sm font-bold text-white shadow-[0_4px_16px_rgba(14,165,233,0.35)] transition hover:shadow-[0_6px_20px_rgba(14,165,233,0.45)] hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:translate-y-0">
+                    {quickSubmitting ? "Création en cours..." : "Créer le client et continuer →"}
+                  </button>
+                </form>
+              )}
+
+              {/* ── STEP 1a: Appointment form ── */}
+              {bookingType === "appointment" && !quickCreateOpen && (
+                <div className="p-6 space-y-5">
+                  <button type="button" onClick={() => setBookingType(null)} className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                    Retour
+                  </button>
+
+                  {/* Client picker */}
+                  <div>
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Client</label>
+                    {selectedClientForBooking ? (
+                      <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-black text-white">
+                            {(selectedClientForBooking.first_name?.[0] ?? "?").toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-emerald-950 text-sm truncate">{selectedClientForBooking.first_name} {selectedClientForBooking.last_name}</p>
+                            <p className="text-[11px] text-emerald-700 font-semibold">{selectedClientForBooking.phone}</p>
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => { setSelectedClientForBooking(null); setSearchClientForBooking(""); }}
+                          className="shrink-0 rounded-full border border-emerald-200 bg-white px-3 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 transition">
+                          Changer
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 space-y-2">
+                        <div className="relative flex gap-2">
+                          <div className="relative flex-1">
+                            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            <input type="text" value={searchClientForBooking} onChange={(e) => setSearchClientForBooking(e.target.value)}
+                              placeholder="Rechercher par nom ou téléphone..." autoFocus
+                              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100 transition" />
+                          </div>
+                          <button type="button" onClick={() => setQuickCreateOpen(true)}
+                            className="shrink-0 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100 transition whitespace-nowrap">
+                            + Nouveau
+                          </button>
+                        </div>
+                        {searchClientForBooking && (
+                          <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.08)]">
+                            {clientsForBookingResults.length === 0 ? (
+                              <p className="p-4 text-center text-sm text-slate-400">Aucun client trouvé</p>
+                            ) : (
+                              <div className="max-h-40 overflow-y-auto divide-y divide-slate-50">
+                                {clientsForBookingResults.map((c) => (
+                                  <button key={c.id} type="button" onClick={() => { setSelectedClientForBooking(c); setSearchClientForBooking(""); }}
+                                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-sky-50 transition">
+                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-100 text-[11px] font-black text-sky-700">
+                                      {(c.first_name?.[0] ?? "?").toUpperCase()}
+                                    </div>
+                                    <span className="flex-1 text-sm font-bold text-slate-800">{c.first_name} {c.last_name}</span>
+                                    <span className="text-xs text-slate-400 font-semibold">{c.phone}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Wash mode */}
+                  <div>
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Mode de lavage</label>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {washModes.map((mode) => {
+                        const end = addMinutesToTime(slotStart, mode.duration);
+                        const hasConflict = bookings.some((b) => {
+                          if (b.status === "ANNULE") return false;
+                          if (b.resource !== resId) return false;
+                          return overlapsSlot(toMinutes(b.start_time), toMinutes(b.end_time), toMinutes(slotStart), toMinutes(end));
+                        });
+                        const isSelected = selectedWashMode === mode.key;
+                        return (
+                          <button key={mode.key} type="button" onClick={() => setSelectedWashMode(mode.key)}
+                            className={`relative rounded-2xl border-2 p-3.5 text-left transition ${
+                              isSelected
+                                ? `border-transparent bg-gradient-to-br ${mode.accent} text-white shadow-[0_4px_16px_rgba(0,0,0,0.15)]`
+                                : hasConflict
+                                  ? "border-rose-200 bg-rose-50 opacity-70 cursor-pointer"
+                                  : "border-slate-100 bg-white hover:border-slate-300 hover:shadow-sm"
+                            }`}>
+                            {hasConflict && (
+                              <span className="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-black text-white">!</span>
+                            )}
+                            <p className={`text-sm font-black ${isSelected ? "text-white" : hasConflict ? "text-rose-700" : "text-slate-900"}`}>{mode.label}</p>
+                            <p className={`text-[11px] font-semibold mt-0.5 ${isSelected ? "text-white/80" : "text-slate-500"}`}>{mode.duration} min · {mode.price} DA</p>
+                            <p className={`text-[11px] font-semibold mt-0.5 ${isSelected ? "text-white/70" : "text-slate-400"}`}>{slotStart} → {end}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Conflict warning for selected mode */}
+                  {conflictsForAppointment.length > 0 && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500 text-white">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-rose-800">Créneau déjà occupé</p>
+                        <p className="text-xs text-rose-700 mt-0.5">
+                          {conflictsForAppointment.map((b) => `${getBookingClientName(b)} (${b.start_time.slice(0,5)}–${b.end_time.slice(0,5)})`).join(", ")}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Payment status */}
+                  <div>
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Statut du paiement</label>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <button type="button" onClick={() => setPaymentStatus("EN_ATTENTE")}
+                        className={`rounded-2xl border-2 py-3 text-sm font-bold transition ${
+                          paymentStatus === "EN_ATTENTE"
+                            ? "border-amber-400 bg-amber-50 text-amber-900 shadow-[0_2px_8px_rgba(245,158,11,0.2)]"
+                            : "border-slate-100 bg-white text-slate-500 hover:border-amber-200"
+                        }`}>
+                        En attente
+                      </button>
+                      <button type="button" onClick={() => setPaymentStatus("PAYE")}
+                        className={`rounded-2xl border-2 py-3 text-sm font-bold transition ${
+                          paymentStatus === "PAYE"
+                            ? "border-emerald-400 bg-emerald-50 text-emerald-900 shadow-[0_2px_8px_rgba(16,185,129,0.2)]"
+                            : "border-slate-100 bg-white text-slate-500 hover:border-emerald-200"
+                        }`}>
+                        Payé
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Price summary */}
+                  <div className={`rounded-2xl border p-4 bg-gradient-to-br ${selectedMode.accent} text-white`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-white/70 uppercase tracking-wider">Total à régler</p>
+                        <p className="text-xs text-white/60 mt-0.5">{selectedMode.duration} min · {slotStart} → {appointmentEnd}</p>
+                      </div>
+                      <p className="text-3xl font-black">{selectedMode.price} <span className="text-lg font-semibold">DA</span></p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── STEP 2: Maintenance form ── */}
+              {bookingType === "maintenance" && (
+                <div className="p-6 space-y-5">
+                  <button type="button" onClick={() => setBookingType(null)} className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                    Retour
+                  </button>
+
+                  {/* Duration */}
+                  <div>
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Durée de la maintenance</label>
+                    <div className="mt-2 grid grid-cols-4 gap-2">
+                      {[15, 30, 45, 60, 75, 90, 105, 120].map((dur) => {
+                        const end = addMinutesToTime(slotStart, dur);
+                        const hasConflict = bookings.some((b) => {
+                          if (b.status === "ANNULE") return false;
+                          if (b.resource !== resId) return false;
+                          return overlapsSlot(toMinutes(b.start_time), toMinutes(b.end_time), toMinutes(slotStart), toMinutes(end));
+                        });
+                        const isSelected = maintenanceDuration === dur;
+                        return (
+                          <button key={dur} type="button" onClick={() => setMaintenanceDuration(dur)}
+                            className={`relative rounded-xl border-2 py-2.5 text-center text-xs font-bold transition ${
+                              isSelected
+                                ? "border-amber-500 bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-[0_4px_12px_rgba(245,158,11,0.3)]"
+                                : hasConflict
+                                  ? "border-rose-200 bg-rose-50 text-rose-600"
+                                  : "border-slate-100 bg-white text-slate-600 hover:border-amber-300 hover:text-amber-700"
+                            }`}>
+                            {hasConflict && !isSelected && (
+                              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-black text-white">!</span>
+                            )}
+                            {dur}m
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 flex items-center gap-3">
+                      <input type="number" value={maintenanceDuration} min={15} step={15}
+                        onChange={(e) => { const v = parseInt(e.target.value) || 15; setMaintenanceDuration(Math.max(15, Math.round(v / 15) * 15)); }}
+                        className="w-24 rounded-xl border border-amber-200 bg-amber-50/40 px-3 py-2 text-center text-sm font-bold text-slate-900 outline-none focus:border-amber-400 focus:bg-white transition" />
+                      <span className="text-sm text-slate-500 font-semibold">minutes</span>
+                      <span className="ml-auto text-sm font-bold text-slate-600">{slotStart} <span className="text-slate-400 font-normal">→</span> {maintenanceEnd}</span>
+                    </div>
+                  </div>
+
+                  {/* Conflict warning */}
+                  {conflictsForMaintenance.length > 0 && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500 text-white">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-rose-800">Créneau déjà occupé</p>
+                        <p className="text-xs text-rose-700 mt-0.5">
+                          {conflictsForMaintenance.map((b) =>
+                            b.user === null
+                              ? `Maintenance existante (${b.start_time.slice(0,5)}–${b.end_time.slice(0,5)})`
+                              : `${getBookingClientName(b)} (${b.start_time.slice(0,5)}–${b.end_time.slice(0,5)})`
+                          ).join(", ")}
+                        </p>
+                        <p className="text-xs text-rose-600 mt-1 font-semibold">La maintenance sera tout de même bloquée côté serveur si le créneau est libre.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Summary card */}
+                  <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-[0_4px_12px_rgba(245,158,11,0.3)]">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-black text-amber-900">{selectedSlotForBooking.resource.label} — {maintenanceDuration} min</p>
+                        <p className="text-xs text-amber-700 font-semibold mt-0.5 capitalize">{dateLabel} · {slotStart} → {maintenanceEnd}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Sticky footer ── */}
+            {bookingType === "appointment" && !quickCreateOpen && (
+              <div className="border-t border-slate-100 bg-white px-6 py-4">
+                <button type="button" disabled={submittingBooking || !selectedClientForBooking || conflictsForAppointment.length > 0} onClick={handleSaveManualBooking}
+                  className="w-full rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 py-3.5 text-sm font-bold text-white shadow-[0_4px_16px_rgba(14,165,233,0.3)] transition hover:shadow-[0_6px_20px_rgba(14,165,233,0.4)] hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none">
+                  {submittingBooking ? "Enregistrement..." : conflictsForAppointment.length > 0 ? "Créneau indisponible" : !selectedClientForBooking ? "Sélectionnez un client" : "Confirmer le rendez-vous →"}
                 </button>
               </div>
             )}
+            {bookingType === "maintenance" && (
+              <div className="border-t border-slate-100 bg-white px-6 py-4">
+                <button type="button" disabled={submittingBooking || conflictsForMaintenance.length > 0} onClick={handleSaveMaintenanceBooking}
+                  className="w-full rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 py-3.5 text-sm font-bold text-white shadow-[0_4px_16px_rgba(245,158,11,0.3)] transition hover:shadow-[0_6px_20px_rgba(245,158,11,0.4)] hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none">
+                  {submittingBooking ? "Enregistrement..." : conflictsForMaintenance.length > 0 ? "Créneau indisponible" : "Planifier la maintenance →"}
+                </button>
+              </div>
+            )}
+
           </div>
         </div>
-      )}
+        );
+      })()}
       </main>
       {/* Quick access ticket button on customer detail pages */}
       {location.pathname.includes("/admin/dashboard/customers/") && !location.pathname.includes("/ticket") && (

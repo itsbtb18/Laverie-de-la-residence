@@ -18,7 +18,7 @@ export type ValidationBooking = {
   booking_date: string;
   start_time: string;
   end_time: string;
-  status: "EN_ATTENTE" | "PAYE" | "ANNULE";
+  status: "EN_ATTENTE" | "PAYE" | "ANNULE" | "MAINTENANCE";
   total_price: string;
   validated_by_phone?: string;
 };
@@ -106,52 +106,52 @@ export function AdminValidationPanel({
   }, [isBookingReferenceMode]);
 
   return (
-    <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden bg-[#070b14] text-white">
+    <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden bg-white text-slate-900">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="animate-float-soft absolute -left-24 top-0 h-72 w-72 rounded-full bg-cyan-500/20 blur-[100px]" />
-        <div className="animate-float-soft absolute -right-16 top-1/3 h-80 w-80 rounded-full bg-indigo-600/25 blur-[110px] delay-300" />
-        <div className="absolute bottom-0 left-1/4 h-64 w-64 rounded-full bg-sky-500/10 blur-[90px]" />
+        <div className="animate-float-soft absolute -left-24 top-0 h-72 w-72 rounded-full bg-cyan-400/15 blur-[100px]" />
+        <div className="animate-float-soft absolute -right-16 top-1/3 h-80 w-80 rounded-full bg-sky-400/20 blur-[110px] delay-300" />
+        <div className="absolute bottom-0 left-1/4 h-64 w-64 rounded-full bg-cyan-300/10 blur-[90px]" />
         <div
           className="absolute inset-0 opacity-[0.35]"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0)",
+              "radial-gradient(circle at 1px 1px, rgba(6,182,212,0.08) 1px, transparent 0)",
             backgroundSize: "28px 28px",
           }}
         />
       </div>
 
-      <header className="relative z-10 shrink-0 border-b border-white/5 bg-[#070b14]/80 backdrop-blur-xl">
+      <header className="relative z-10 shrink-0 border-b border-cyan-100 bg-white/80 backdrop-blur-xl">
         <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 animate-fade-in-up">
-              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-cyan-400/90">
+              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-cyan-600">
                 Rendez-vous
               </p>
-              <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">
+              <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
                 Validation
               </h1>
-              <p className="mt-1 max-w-md text-xs font-medium leading-relaxed text-slate-400 sm:text-sm">
+              <p className="mt-1 max-w-md text-xs font-medium leading-relaxed text-slate-600 sm:text-sm">
                 Recherchez une réservation par référence, un client par nom ou téléphone, ou
                 scannez un QR ticket.
               </p>
             </div>
             {resolvingQr ? (
-              <div className="flex shrink-0 items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-bold text-cyan-300 animate-pulse-soft">
-                <span className="h-2 w-2 rounded-full bg-cyan-400" />
+              <div className="flex shrink-0 items-center gap-2 rounded-full border border-cyan-400/50 bg-cyan-100 px-3 py-1.5 text-[11px] font-bold text-cyan-700 animate-pulse-soft">
+                <span className="h-2 w-2 rounded-full bg-cyan-500" />
                 Identification…
               </div>
             ) : null}
           </div>
 
-          <div className="flex rounded-2xl border border-white/10 bg-white/5 p-1 backdrop-blur-md">
+          <div className="flex rounded-2xl border border-cyan-200 bg-slate-50 p-1 backdrop-blur-md">
             <button
               type="button"
               onClick={() => setMode("search")}
               className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-bold transition-all duration-300 sm:text-sm ${
                 mode === "search"
                   ? "bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-500 text-white shadow-[0_8px_32px_rgba(14,165,233,0.35)]"
-                  : "text-slate-400 hover:text-white"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -165,7 +165,7 @@ export function AdminValidationPanel({
               className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-bold transition-all duration-300 sm:text-sm ${
                 mode === "scan"
                   ? "bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-500 text-white shadow-[0_8px_32px_rgba(14,165,233,0.35)]"
-                  : "text-slate-400 hover:text-white"
+                  : "text-slate-600 hover:text-slate-900"
               }`}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -183,8 +183,8 @@ export function AdminValidationPanel({
             <div className="shrink-0 px-4 pt-2 sm:px-6 lg:px-8">
               <div className="group relative">
                 <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-500 opacity-40 blur transition duration-500 group-focus-within:opacity-70" />
-                <div className="relative flex items-center rounded-2xl border border-white/10 bg-[#0d1320]/90 shadow-2xl backdrop-blur-xl">
-                  <span className="pl-4 text-slate-500">
+                <div className="relative flex items-center rounded-2xl border border-cyan-200 bg-white shadow-2xl backdrop-blur-xl">
+                  <span className="pl-4 text-slate-400">
                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
@@ -195,13 +195,13 @@ export function AdminValidationPanel({
                     onChange={(e) => onSearchChange(e.target.value)}
                     placeholder={searchHint}
                     autoComplete="off"
-                    className="w-full bg-transparent py-4 pl-3 pr-4 text-sm font-medium text-white outline-none placeholder:text-slate-500 sm:py-5 sm:text-base"
+                    className="w-full bg-transparent py-4 pl-3 pr-4 text-sm font-medium text-slate-900 outline-none placeholder:text-slate-400 sm:py-5 sm:text-base"
                   />
                   {hasQuery ? (
                     <button
                       type="button"
                       onClick={() => onSearchChange("")}
-                      className="mr-3 rounded-lg px-2 py-1 text-xs font-bold text-slate-500 transition hover:bg-white/10 hover:text-white"
+                      className="mr-3 rounded-lg px-2 py-1 text-xs font-bold text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
                     >
                       Effacer
                     </button>
@@ -218,25 +218,25 @@ export function AdminValidationPanel({
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 lg:px-8">
               {loading ? (
                 <div className="flex flex-col items-center justify-center gap-3 py-16">
-                  <div className="h-10 w-10 animate-spin rounded-full border-2 border-cyan-500/30 border-t-cyan-400" />
-                  <p className="text-sm font-semibold text-slate-400">{t("loading")}</p>
+                  <div className="h-10 w-10 animate-spin rounded-full border-2 border-cyan-200 border-t-cyan-500" />
+                  <p className="text-sm font-semibold text-slate-600">{t("loading")}</p>
                 </div>
               ) : !hasQuery ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center animate-fade-in-up sm:py-20">
-                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
-                    <svg className="h-8 w-8 text-cyan-400/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-50">
+                    <svg className="h-8 w-8 text-cyan-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
                   </div>
-                  <p className="text-sm font-bold text-slate-300">Commencez une recherche</p>
-                  <p className="mt-2 max-w-xs text-xs leading-relaxed text-slate-500">
-                    Référence <span className="font-mono text-cyan-400/90">CRN-…</span> pour un
+                  <p className="text-sm font-bold text-slate-900">Commencez une recherche</p>
+                  <p className="mt-2 max-w-xs text-xs leading-relaxed text-slate-600">
+                    Référence <span className="font-mono text-cyan-600">CRN-…</span> pour un
                     rendez-vous, ou nom / téléphone pour un client.
                   </p>
                   <button
                     type="button"
                     onClick={() => setMode("scan")}
-                    className="mt-6 inline-flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-5 py-2.5 text-xs font-bold text-cyan-300 transition hover:bg-cyan-500/20"
+                    className="mt-6 inline-flex items-center gap-2 rounded-xl border border-cyan-400/50 bg-cyan-100 px-5 py-2.5 text-xs font-bold text-cyan-700 transition hover:bg-cyan-200"
                   >
                     Ouvrir le scanner
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -245,7 +245,7 @@ export function AdminValidationPanel({
                   </button>
                 </div>
               ) : showEmpty ? (
-                <p className="py-12 text-center text-sm font-medium text-slate-500 animate-fade-in">
+                <p className="py-12 text-center text-sm font-medium text-slate-600 animate-fade-in">
                   {isBookingReferenceMode ? t("noBookingsFound") : t("noClientsFound")}
                 </p>
               ) : (
@@ -256,18 +256,18 @@ export function AdminValidationPanel({
                       type="button"
                       onClick={() => onSelectClient(client)}
                       style={{ animationDelay: `${index * 40}ms` }}
-                      className="animate-fade-in-up group flex w-full items-center gap-4 rounded-2xl border border-white/8 bg-white/[0.04] p-4 text-left transition duration-300 hover:border-cyan-500/30 hover:bg-white/[0.07] hover:shadow-[0_12px_40px_rgba(6,182,212,0.12)] active:scale-[0.99]"
+                      className="animate-fade-in-up group flex w-full items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left transition duration-300 hover:border-cyan-400 hover:bg-cyan-50 hover:shadow-[0_12px_40px_rgba(6,182,212,0.12)] active:scale-[0.99]"
                     >
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-lg font-black shadow-lg shadow-cyan-500/20">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-lg font-black text-white shadow-lg shadow-cyan-500/20">
                         {(client.first_name?.[0] || "?").toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-base font-bold text-white group-hover:text-cyan-100">
+                        <p className="truncate text-base font-bold text-slate-900 group-hover:text-cyan-900">
                           {client.first_name} {client.last_name}
                         </p>
-                        <p className="mt-0.5 text-sm font-medium text-slate-400">{client.phone}</p>
+                        <p className="mt-0.5 text-sm font-medium text-slate-600">{client.phone}</p>
                       </div>
-                      <span className="shrink-0 text-xs font-bold text-cyan-400 opacity-0 transition group-hover:opacity-100">
+                      <span className="shrink-0 text-xs font-bold text-cyan-600 opacity-0 transition group-hover:opacity-100">
                         Fiche →
                       </span>
                     </button>
@@ -281,27 +281,27 @@ export function AdminValidationPanel({
                       style={{ animationDelay: `${index * 40}ms` }}
                       className={`animate-fade-in-up group flex w-full flex-col gap-2 rounded-2xl border p-4 text-left transition duration-300 active:scale-[0.99] sm:flex-row sm:items-center sm:justify-between ${
                         selectedBooking?.id === booking.id
-                          ? "border-cyan-400/50 bg-cyan-500/10 shadow-[0_12px_40px_rgba(6,182,212,0.15)]"
-                          : "border-white/8 bg-white/[0.04] hover:border-cyan-500/25 hover:bg-white/[0.07]"
+                          ? "border-cyan-400 bg-cyan-100 shadow-[0_12px_40px_rgba(6,182,212,0.15)]"
+                          : "border-slate-200 bg-white hover:border-cyan-300 hover:bg-cyan-50"
                       }`}
                     >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-sm font-black text-cyan-300">
+                          <span className="font-mono text-sm font-black text-cyan-600">
                             {booking.booking_reference}
                           </span>
                           <StatusBadge status={booking.status} />
                         </div>
-                        <p className="mt-1 truncate text-sm font-semibold text-white">
+                        <p className="mt-1 truncate text-sm font-semibold text-slate-900">
                           {getBookingClientName(booking)}
                         </p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-slate-600">
                           {booking.user_phone} · {booking.resource_label} ·{" "}
                           {booking.booking_date}{" "}
                           {booking.start_time.slice(0, 5)}–{booking.end_time.slice(0, 5)}
                         </p>
                       </div>
-                      <span className="text-lg font-bold text-cyan-400/80 group-hover:text-cyan-300">
+                      <span className="text-lg font-bold text-cyan-600 group-hover:text-cyan-700">
                         →
                       </span>
                     </button>
@@ -313,8 +313,8 @@ export function AdminValidationPanel({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 lg:px-8 animate-fade-in">
             <div className="mx-auto w-full max-w-2xl flex-1">
-              <div className="rounded-3xl border border-white/10 bg-white p-4 shadow-[0_24px_80px_rgba(0,0,0,0.45)] sm:p-6">
-                <p className="mb-4 text-center text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
+              <div className="rounded-3xl border border-cyan-200 bg-white p-4 shadow-[0_24px_80px_rgba(6,182,212,0.15)] sm:p-6">
+                <p className="mb-4 text-center text-xs font-bold uppercase tracking-[0.25em] text-slate-600">
                   QR ticket client ou rendez-vous
                 </p>
                 <WhatsAppQrScanner
@@ -323,11 +323,6 @@ export function AdminValidationPanel({
                   onStatusChange={onScanStatusChange}
                 />
               </div>
-              <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-500">
-                Utilisez{" "}
-                <span className="font-semibold text-slate-400">https://</span> sur téléphone pour
-                activer la caméra. Acceptez l&apos;accès caméra du navigateur.
-              </p>
             </div>
           </div>
         )}
@@ -335,7 +330,7 @@ export function AdminValidationPanel({
 
       {selectedBooking ? (
         <div
-          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 backdrop-blur-md animate-fade-in sm:items-center sm:justify-center sm:p-6"
+          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40 backdrop-blur-md animate-fade-in sm:items-center sm:justify-center sm:p-6"
           role="presentation"
           onClick={() => onSelectBooking(null)}
         >
@@ -344,25 +339,25 @@ export function AdminValidationPanel({
             aria-modal="true"
             aria-label="Détails du rendez-vous"
             onClick={(e) => e.stopPropagation()}
-            className="animate-fade-in-up flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-[#0d1320] shadow-[0_-20px_80px_rgba(0,0,0,0.5)] sm:max-w-lg sm:rounded-[2rem]"
+            className="animate-fade-in-up flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[2rem] border border-cyan-200 bg-white shadow-[0_-20px_80px_rgba(6,182,212,0.2)] sm:max-w-lg sm:rounded-[2rem]"
           >
-            <div className="premium-accent shrink-0 px-6 py-5">
+            <div className="shrink-0 bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-500 px-6 py-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[10px] font-black uppercase tracking-[0.35em] text-white/70">
+                  <p className="text-[10px] font-black uppercase tracking-[0.35em] text-white/90">
                     Rendez-vous
                   </p>
                   <h2 className="mt-1 truncate text-xl font-black text-white sm:text-2xl">
                     {selectedBooking.booking_reference}
                   </h2>
-                  <p className="mt-1 truncate text-sm font-semibold text-white/85">
+                  <p className="mt-1 truncate text-sm font-semibold text-white/95">
                     {getBookingClientName(selectedBooking)}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => onSelectBooking(null)}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 text-white transition hover:bg-white/30"
                   aria-label="Fermer"
                 >
                   ✕
@@ -370,7 +365,7 @@ export function AdminValidationPanel({
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 px-6 py-5">
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 {[
                   ["Téléphone", selectedBooking.user_phone],
@@ -392,18 +387,18 @@ export function AdminValidationPanel({
                 ].map(([label, value]) => (
                   <div
                     key={label}
-                    className="rounded-xl border border-white/8 bg-white/[0.04] px-3 py-3"
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-3"
                   >
-                    <dt className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                    <dt className="text-[10px] font-black uppercase tracking-wider text-slate-600">
                       {label}
                     </dt>
-                    <dd className="mt-1 font-bold text-white">{value}</dd>
+                    <dd className="mt-1 font-bold text-slate-900">{value}</dd>
                   </div>
                 ))}
               </dl>
             </div>
 
-            <div className="shrink-0 border-t border-white/8 px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 {selectedBooking.status === "EN_ATTENTE" ? (
                   <button

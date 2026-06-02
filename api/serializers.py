@@ -228,13 +228,31 @@ class BookingSerializer(serializers.ModelSerializer):
         source="resource.establishment.name", read_only=True
     )
     resource_label = serializers.CharField(source="resource.label", read_only=True)
-    user_first_name = serializers.CharField(source="user.first_name", read_only=True)
-    user_last_name = serializers.CharField(source="user.last_name", read_only=True)
-    user_phone = serializers.CharField(source="user.phone", read_only=True)
-    validated_by_phone = serializers.CharField(
-        source="validated_by.phone", read_only=True
-    )
+    user_first_name = serializers.SerializerMethodField()
+    user_last_name = serializers.SerializerMethodField()
+    user_phone = serializers.SerializerMethodField()
+    validated_by_phone = serializers.SerializerMethodField()
+    validated_by_first_name = serializers.SerializerMethodField()
+    validated_by_last_name = serializers.SerializerMethodField()
     validated_at = serializers.DateTimeField(read_only=True)
+
+    def get_user_first_name(self, obj):
+        return obj.user.first_name if obj.user else ""
+
+    def get_user_last_name(self, obj):
+        return obj.user.last_name if obj.user else ""
+
+    def get_user_phone(self, obj):
+        return obj.user.phone if obj.user else ""
+
+    def get_validated_by_phone(self, obj):
+        return obj.validated_by.phone if obj.validated_by else ""
+
+    def get_validated_by_first_name(self, obj):
+        return obj.validated_by.first_name if obj.validated_by else ""
+
+    def get_validated_by_last_name(self, obj):
+        return obj.validated_by.last_name if obj.validated_by else ""
 
     class Meta:
         model = Booking
@@ -259,10 +277,21 @@ class BookingSerializer(serializers.ModelSerializer):
             "validated_at",
             "validated_by",
             "validated_by_phone",
+            "validated_by_first_name",
+            "validated_by_last_name",
         ]
-        read_only_fields = ["id", "created_at", "validated_at", "validated_by_phone"]
+        read_only_fields = ["id", "created_at", "validated_at", "validated_by_phone",
+                            "validated_by_first_name", "validated_by_last_name"]
 
     def validate(self, attrs):
+        # Allow null user for MAINTENANCE status
+        if attrs.get("status") == BookingStatus.MAINTENANCE:
+            if attrs.get("user") is not None:
+                raise serializers.ValidationError(
+                    {"user": "Une maintenance ne peut pas avoir d'utilisateur associé."}
+                )
+            return attrs
+
         if (
             attrs.get("status") == BookingStatus.ANNULE
             and attrs.get("validated_by") is None

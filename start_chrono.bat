@@ -55,12 +55,13 @@ start "Laverie Django" cmd /k "cd /d "%~dp0" && call venv\Scripts\activate.bat &
 echo [6/7] Service WhatsApp Cloud (Meta)...
 start "Laverie WhatsApp Cloud" cmd /k "cd /d "%~dp0whatsapp_cloud" && if not exist node_modules npm install && npm start"
 
-echo [7/7] Frontend Vite (optionnel)...
-echo Lancez manuellement: npm run dev
+echo [7/7] Lancement du Frontend Vite...
+start "Chrono DZ Frontend" cmd /k "cd /d "%~dp0" && npm run dev"
 echo.
 echo Services demarres:
 echo - Django: http://127.0.0.1:8000
 echo - WhatsApp Cloud API: http://127.0.0.1:5000/health
+echo - Frontend Vite: http://localhost:5173
 echo.
 echo Configurez .env avec WHATSAPP_ACCESS_TOKEN et WHATSAPP_PHONE_NUMBER_ID (Meta).
 echo.

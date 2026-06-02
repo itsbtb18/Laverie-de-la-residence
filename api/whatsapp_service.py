@@ -168,6 +168,9 @@ def notify_booking_confirmation(booking: Booking) -> None:
     if booking.status == BookingStatus.ANNULE:
         return
 
+    if booking.user is None:
+        return
+
     payload = WhatsAppConfirmationPayload(
         phone=booking.user.phone,
         first_name=booking.user.first_name or "",

@@ -49,6 +49,7 @@ class BookingStatus(models.TextChoices):
     EN_ATTENTE = "EN_ATTENTE", "Paiement en attente"
     PAYE = "PAYE", "Payé"
     ANNULE = "ANNULE", "Annulé"
+    MAINTENANCE = "MAINTENANCE", "Maintenance"
 
 
 class PaymentMethod(models.TextChoices):
@@ -239,6 +240,8 @@ class Booking(models.Model):
         on_delete=models.PROTECT,
         related_name="bookings",
         verbose_name="Client",
+        null=True,
+        blank=True,
     )
     resource = models.ForeignKey(
         Resource,
