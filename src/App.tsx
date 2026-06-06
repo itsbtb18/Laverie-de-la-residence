@@ -12,6 +12,8 @@ import { AdminBookingDetailPage } from "./pages/AdminBookingDetailPage";
 import { AdminCustomerDetailPage } from "./pages/AdminCustomerDetailPage";
 import { AdminAssistantPage } from "./pages/AdminAssistantPage";
 import { BookingPage } from "./pages/BookingPage";
+import { PaymentSuccessPage } from "./pages/PaymentSuccessPage";
+import { PaymentFailurePage } from "./pages/PaymentFailurePage";
 import { LanguageSelectionPage } from "./pages/LanguageSelectionPage";
 import { ReservationConfirmationPage } from "./pages/ReservationConfirmationPage";
 import { StaffLogin } from "./pages/StaffLogin";
@@ -110,6 +112,8 @@ export default function App() {
             element={<BookingPage language={language} phoneNumber={getAuthSession()?.phone || ""} />}
           />
           <Route path="/confirmation" element={<ReservationConfirmationPage />} />
+          <Route path="/payment/success" element={<PaymentSuccessPage />} />
+          <Route path="/payment/failure" element={<PaymentFailurePage />} />
         </Route>
 
         <Route element={<ProtectedRoute allowedRoles={["ADMIN", "SUPER_ADMIN"]} redirectTo="/staff/login" />}>

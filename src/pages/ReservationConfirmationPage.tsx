@@ -287,7 +287,28 @@ export function ReservationConfirmationPage() {
         throw new Error(errorPayload?.detail || "Impossible d'enregistrer le rendez-vous.");
       }
 
-      const result = (await response.json()) as { booking_reference: string };
+      const result = (await response.json()) as { id: number; booking_reference: string };
+
+      // ── BaridiMob → redirect to Chargily checkout ──────────────────────
+      if (paymentMethod === "baridimob") {
+        const checkoutResp = await fetch("/api/payments/chargily/create-checkout/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeader() },
+          body: JSON.stringify({ booking_id: result.id }),
+        });
+
+        if (!checkoutResp.ok) {
+          const errPayload = await checkoutResp.json().catch(() => ({}));
+          throw new Error(errPayload?.error || "Impossible de créer le paiement BaridiMob.");
+        }
+
+        const { checkout_url } = (await checkoutResp.json()) as { checkout_url: string };
+        // Full redirect to Chargily payment page
+        window.location.href = checkout_url;
+        return; // stop here — success page handles the rest
+      }
+
+      // ── Cash → show inline confirmation (existing behaviour) ────────────
       const nextConfirmedBooking: ConfirmedBooking = {
         ...confirmation,
         paymentMethod,

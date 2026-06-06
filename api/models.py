@@ -290,6 +290,12 @@ class Booking(models.Model):
         blank=True,
         verbose_name="Rappel WhatsApp envoyé le",
     )
+    chargily_checkout_id = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        verbose_name="Chargily Checkout ID",
+    )
 
     class Meta:
         verbose_name = "Réservation"

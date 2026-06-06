@@ -3,6 +3,11 @@ from __future__ import annotations
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .payment_views import (
+    ChargilyCreateCheckoutView,
+    ChargilyVerifyPaymentView,
+    ChargilyWebhookView,
+)
 from .views import (
     BookingViewSet,
     CustomerLoginAPIView,
@@ -48,6 +53,11 @@ superadmin_router.register(
 
 
 urlpatterns = [
+    # Chargily Pay
+    path("payments/chargily/create-checkout/", ChargilyCreateCheckoutView.as_view(), name="chargily-create-checkout"),
+    path("payments/chargily/webhook/", ChargilyWebhookView.as_view(), name="chargily-webhook"),
+    path("payments/chargily/verify/", ChargilyVerifyPaymentView.as_view(), name="chargily-verify"),
+
     path("auth/login/", CustomerLoginAPIView.as_view(), name="auth-login"),
     path("auth/staff/login/", StaffLoginAPIView.as_view(), name="auth-staff-login"),
     path(
