@@ -15,6 +15,8 @@ import { BookingPage } from "./pages/BookingPage";
 import { PaymentSuccessPage } from "./pages/PaymentSuccessPage";
 import { PaymentFailurePage } from "./pages/PaymentFailurePage";
 import { LanguageSelectionPage } from "./pages/LanguageSelectionPage";
+import { WelcomePage } from "./pages/WelcomePage";
+import { GuidePage } from "./pages/GuidePage";
 import { ModeDetailPage } from "./pages/ModeDetailPage";
 import { ReservationConfirmationPage } from "./pages/ReservationConfirmationPage";
 import { StaffLogin } from "./pages/StaffLogin";
@@ -69,7 +71,12 @@ export default function App() {
   return (
     <LanguageAwareShell language={language}>
       <Routes>
-        <Route path="/" element={<Navigate to="/language" replace />} />
+        <Route path="/" element={<Navigate to="/bienvenu" replace />} />
+
+        <Route
+          path="/bienvenu"
+          element={<WelcomePage onStart={() => navigate("/language")} />}
+        />
 
         <Route
           path="/language"
@@ -94,6 +101,8 @@ export default function App() {
                 />
           }
         />
+
+        <Route path="/guide" element={<GuidePage />} />
 
         <Route
           path="/staff/login"

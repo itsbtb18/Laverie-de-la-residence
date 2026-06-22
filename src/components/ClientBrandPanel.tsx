@@ -17,6 +17,12 @@ type ClientBrandPanelProps = {
    * understand it). Typography stays identical to the single-language version.
    */
   bilingual?: boolean;
+  /**
+   * When true, the panel does NOT render its own background photo (it relies on
+   * a shared full-screen background drawn by the parent). The legibility
+   * gradients are kept so the white text stays readable.
+   */
+  hideBackground?: boolean;
 };
 
 function CheckIcon() {
@@ -38,7 +44,7 @@ function CheckIcon() {
  * highlights and an optional footer slot giving every client page one
  * consistent, premium template.
  */
-export function ClientBrandPanel({ className = "", footer, eyebrow, bilingual = false }: ClientBrandPanelProps) {
+export function ClientBrandPanel({ className = "", footer, eyebrow, bilingual = false, hideBackground = false }: ClientBrandPanelProps) {
   const { t, i18n } = useTranslation();
   const tFr = i18n.getFixedT("fr");
   const tAr = i18n.getFixedT("ar");
@@ -55,23 +61,31 @@ export function ClientBrandPanel({ className = "", footer, eyebrow, bilingual = 
     <aside
       className={`relative isolate flex min-h-[42vh] flex-col justify-between overflow-hidden px-6 py-8 text-white sm:px-10 sm:py-12 lg:min-h-full ${className}`}
     >
-      {/* Background photo */}
-      <div
-        className="absolute inset-0 -z-20 scale-105"
-        style={{
-          backgroundImage: `url(${backgroundImg})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      />
-      {/* Elegant legibility gradients (dark, not blue) */}
-      <div className="absolute inset-0 -z-10 bg-gradient-to-t from-slate-950/92 via-slate-950/55 to-slate-900/30" />
-      <div className="absolute inset-0 -z-10 bg-[linear-gradient(to_right,rgba(2,6,23,0.55),transparent)] ltr:bg-[linear-gradient(to_right,rgba(2,6,23,0.55),transparent)] rtl:bg-[linear-gradient(to_left,rgba(2,6,23,0.55),transparent)]" />
+      {/* Background photo (skipped when a shared full-screen background is used) */}
+      {!hideBackground && (
+        <div
+          className="absolute inset-0 -z-20 scale-105"
+          style={{
+            backgroundImage: `url(${backgroundImg})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+          }}
+        />
+      )}
+      {/* Full legibility gradients (used only when this panel owns the photo) */}
+      {!hideBackground && (
+        <>
+          <div className="absolute inset-0 -z-10 bg-gradient-to-t from-slate-950/92 via-slate-950/55 to-slate-900/30" />
+          <div className="absolute inset-0 -z-10 bg-[linear-gradient(to_right,rgba(2,6,23,0.55),transparent)] ltr:bg-[linear-gradient(to_right,rgba(2,6,23,0.55),transparent)] rtl:bg-[linear-gradient(to_left,rgba(2,6,23,0.55),transparent)]" />
+        </>
+      )}
       {/* Subtle brand glow accents */}
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -left-28 bottom-10 h-72 w-72 rounded-full bg-sky-500/20 blur-[90px]" />
-        <div className="absolute -right-20 top-0 h-64 w-64 rounded-full bg-cyan-400/15 blur-[90px]" />
-      </div>
+      {!hideBackground && (
+        <div className="pointer-events-none absolute inset-0 -z-10">
+          <div className="absolute -left-28 bottom-10 h-72 w-72 rounded-full bg-sky-500/20 blur-[90px]" />
+          <div className="absolute -right-20 top-0 h-64 w-64 rounded-full bg-cyan-400/15 blur-[90px]" />
+        </div>
+      )}
 
       {/* Top: brand identity — the hero element (big, premium, modern) */}
       <div className="relative z-10 flex items-center gap-4 animate-fade-in sm:gap-6">
@@ -102,28 +116,28 @@ export function ClientBrandPanel({ className = "", footer, eyebrow, bilingual = 
         ) : null}
 
         {/* Slogan */}
-        <h1 className="max-w-[22ch] self-start text-left text-4xl font-black leading-[1.05] tracking-tight drop-shadow-[0_6px_30px_rgba(2,6,23,0.45)] sm:text-5xl lg:text-6xl animate-fade-in-up delay-100">
+        <h1 className="max-w-[22ch] self-start text-start text-4xl font-black leading-[1.05] tracking-tight drop-shadow-[0_6px_30px_rgba(2,6,23,0.45)] sm:text-5xl lg:text-6xl animate-fade-in-up delay-100">
           {bilingual ? tFr("brandSlogan") : t("brandSlogan")}
         </h1>
         {bilingual ? (
           <h2
             dir="rtl"
             lang="ar"
-            className="mt-3 max-w-[22ch] self-start text-left text-3xl font-black leading-[1.2] tracking-tight text-white/85 sm:text-4xl lg:text-5xl animate-fade-in-up delay-100"
+            className="mt-3 self-start whitespace-nowrap text-left text-3xl font-black leading-[1.3] tracking-tight text-white drop-shadow-[0_6px_30px_rgba(2,6,23,0.45)] sm:text-4xl lg:text-5xl animate-fade-in-up delay-100"
           >
             {tAr("brandSlogan")}
           </h2>
         ) : null}
 
         {/* Tagline */}
-        <p className="mt-5 max-w-2xl self-start text-left text-sm leading-7 text-white/80 sm:text-base animate-fade-in-up delay-200">
+        <p className="mt-5 max-w-2xl self-start text-start text-sm font-black leading-7 text-white sm:text-base animate-fade-in-up delay-200">
           {bilingual ? tFr("brandTagline") : t("brandTagline")}
         </p>
         {bilingual ? (
           <p
             dir="rtl"
             lang="ar"
-            className="mt-2 max-w-2xl self-start text-left text-sm leading-7 text-white/60 sm:text-base animate-fade-in-up delay-200"
+            className="mt-2 max-w-2xl self-start text-left text-sm font-black leading-7 text-white sm:text-base animate-fade-in-up delay-200"
           >
             {tAr("brandTagline")}
           </p>
@@ -132,13 +146,13 @@ export function ClientBrandPanel({ className = "", footer, eyebrow, bilingual = 
         {/* Features */}
         <ul className="mt-8 grid gap-3.5 animate-fade-in-up delay-300">
           {features.map((feature) => (
-            <li key={feature.main} className="flex flex-col items-start text-sm font-medium text-white/90 sm:text-base">
+            <li key={feature.main} className="flex flex-col items-start text-sm font-black text-white sm:text-base">
               <div className="flex items-center gap-3 w-full">
                 <CheckIcon />
                 <span className="block text-start leading-snug flex-1">{feature.main}</span>
               </div>
               {"sub" in feature && feature.sub ? (
-                <span dir="rtl" lang="ar" className="block text-start text-xs font-medium leading-snug text-white/55 sm:text-sm pl-10 mt-0.5">
+                <span dir="rtl" lang="ar" className="block text-start text-sm font-black leading-snug text-white sm:text-base pl-10 mt-1">
                   {feature.sub}
                 </span>
               ) : null}

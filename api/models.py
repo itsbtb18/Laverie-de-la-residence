@@ -119,7 +119,14 @@ class Establishment(models.Model):
 
     def clean(self):
         super().clean()
-        if self.opening_time and self.closing_time and self.opening_time >= self.closing_time:
+        # 00:00 (minuit) est accepté comme fin de journée.
+        is_midnight = self.closing_time and self.closing_time.hour == 0 and self.closing_time.minute == 0
+        if (
+            self.opening_time
+            and self.closing_time
+            and not is_midnight
+            and self.opening_time >= self.closing_time
+        ):
             raise ValidationError(
                 {"closing_time": "L'heure de fermeture doit être après l'heure d'ouverture."}
             )
@@ -397,6 +404,12 @@ class ModeLavage(models.Model):
     """Mode de lavage global, réutilisable par plusieurs établissements."""
 
     nom = models.CharField(max_length=120, verbose_name="Nom")
+    nom_ar = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        verbose_name="Nom (arabe)",
+    )
     duree = models.PositiveIntegerField(verbose_name="Durée (minutes)")
     prix_base = models.DecimalField(
         max_digits=10,
@@ -416,10 +429,20 @@ class ModeLavage(models.Model):
         verbose_name="Types de vêtements",
         help_text="Liste de types de vêtements pris en charge.",
     )
+    types_vetements_ar = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Types de vêtements (arabe)",
+    )
     message_guide = models.TextField(
         blank=True,
         default="",
         verbose_name="Pourquoi choisir ce mode (bénéfice client)",
+    )
+    message_guide_ar = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Pourquoi choisir ce mode (arabe)",
     )
     textiles_interdits = models.JSONField(
         default=list,
@@ -427,11 +450,21 @@ class ModeLavage(models.Model):
         verbose_name="Textiles à éviter / interdits",
         help_text="Liste des textiles déconseillés pour ce cycle.",
     )
+    textiles_interdits_ar = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="Textiles à éviter / interdits (arabe)",
+    )
     consigne_securite = models.TextField(
         blank=True,
         default="",
         verbose_name="Consigne de sécurité",
         help_text="Ex. videz les poches, retirez le sable, etc.",
+    )
+    consigne_securite_ar = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Consigne de sécurité (arabe)",
     )
     etablissements = models.ManyToManyField(
         Establishment,

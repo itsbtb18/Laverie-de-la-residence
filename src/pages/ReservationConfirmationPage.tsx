@@ -5,8 +5,8 @@ import { useTranslation } from "react-i18next";
 import { authHeader, clearAuthSession, getAuthSession } from "../auth/session";
 import { ClientBrandPanel } from "../components/ClientBrandPanel";
 import type { AppLanguage } from "../i18n";
-import baridiImg from "../assets/baridi.png";
 import cashImg from "../assets/cash.png";
+import backgroundImg from "../assets/background.png";
 
 type ConfirmationDraft = {
   booking_date: string;
@@ -28,6 +28,8 @@ type ConfirmedBooking = ConfirmationDraft & {
 
 const CONFIRMATION_STORAGE_KEY = "chrono-dz-confirmation";
 const CONFIRMATION_DRAFT_STORAGE_KEY = "chrono-dz-confirmation-draft";
+// Marge tampon (min) entre deux réservations — alignée sur BOOKING_BUFFER_MINUTES (api/views.py).
+const BOOKING_BUFFER_MINUTES = 5;
 
 function dateToLongLabel(dateValue: string, language: AppLanguage) {
   const current = new Date(`${dateValue}T12:00:00`);
@@ -343,29 +345,20 @@ export function ReservationConfirmationPage() {
   const bookingRangeLabel = confirmation ? `${confirmation.start_time} - ${confirmation.end_time}` : "-";
 
   return (
-    <main dir={isArabic ? "rtl" : "ltr"} className="relative min-h-screen w-full overflow-x-hidden bg-[#f4f8ff] text-slate-900">
-      <button
-        type="button"
-        onClick={handleLogout}
-        aria-label="Se déconnecter"
-        title="Se déconnecter"
-        className={`absolute top-4 ${isArabic ? "left-4" : "right-4"} z-20 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/70 bg-white/90 text-slate-700 shadow-[0_14px_35px_rgba(15,23,42,0.12)] backdrop-blur transition hover:-translate-y-0.5 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 focus:outline-none focus:ring-4 focus:ring-sky-100`}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} className="h-5 w-5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M10 16l-4-4m0 0l4-4m-4 4h11" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h3a2 2 0 012 2v10a2 2 0 01-2 2h-3" />
-        </svg>
-      </button>
-
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(14,165,233,0.16),transparent_24%),radial-gradient(circle_at_85%_0%,rgba(59,130,246,0.18),transparent_20%),linear-gradient(135deg,#f8fbff_0%,#eef5ff_48%,#ffffff_100%)]" />
-      <div className="absolute inset-0 opacity-[0.35] [background-image:linear-gradient(rgba(148,163,184,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.12)_1px,transparent_1px)] [background-size:34px_34px]" />
+    <main dir={isArabic ? "rtl" : "ltr"} className="relative min-h-screen w-full overflow-x-hidden text-slate-900">
+      {/* Fond plein écran + filtre cyan (comme la page de sélection de langue) */}
+      <div
+        className="absolute inset-0 -z-20"
+        style={{ backgroundImage: `url(${backgroundImg})`, backgroundSize: "cover", backgroundPosition: "center" }}
+      />
+      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-cyan-900/55 via-sky-900/45 to-slate-900/55" />
 
       <div className="relative z-10 flex min-h-screen w-full items-stretch justify-stretch">
-        <section className="flex w-full bg-white/80 shadow-[0_30px_110px_rgba(15,23,42,0.12)] backdrop-blur-2xl">
+        <section className="flex w-full">
           <div className="grid w-full lg:min-h-screen lg:grid-cols-[0.92fr_1.08fr]">
             <ClientBrandPanel
+              hideBackground
               className="hidden lg:flex lg:min-h-screen"
-              eyebrow={t("confirmationPage")}
               footer={
                 <div className="grid gap-3 rounded-[1.75rem] border border-white/15 bg-white/10 p-5 shadow-[0_18px_50px_rgba(2,132,199,0.18)] backdrop-blur-xl">
                   <div className="flex items-center justify-between">
@@ -378,22 +371,47 @@ export function ReservationConfirmationPage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold text-white">{t("priceTotal")}</span>
-                    <span className="text-sm font-black text-white">{confirmation?.total_price ?? confirmedBooking?.total_price ?? "-"} DA</span>
+                    <span className="text-sm font-black text-white">{confirmation?.total_price ?? confirmedBooking?.total_price ?? "-"} {t("currency")}</span>
                   </div>
                 </div>
               }
             />
 
-            <div className="flex min-h-0 flex-col px-4 py-5 sm:px-8 sm:py-6 lg:px-10 lg:py-10">
-              <div className="mb-5 flex items-center justify-between gap-4 sm:mb-6">
+            <div className="flex min-h-0 flex-col px-4 py-4 pb-7 sm:px-6 sm:py-8 lg:px-8 lg:py-9 animate-fade-in-up">
+              {/* Action buttons (Logout) */}
+              <div className="mb-2 flex justify-end w-full">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  title={t("logout")}
+                  aria-label={t("logout")}
+                  className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 hover:shadow-md"
+                >
+                  <svg className="h-5 w-5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="mb-5 flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.35em] text-sky-500">
+                  <p className="text-xs font-bold uppercase tracking-wide text-cyan-200 drop-shadow-[0_1px_8px_rgba(2,6,23,0.4)]">
                     {confirmedBooking ? t("bookingCreatedLabel") : t("bookingStepFinal")}
                   </p>
-                  <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">
+                  <h2 className="mt-2 text-2xl font-black tracking-tight text-white drop-shadow-[0_2px_14px_rgba(2,6,23,0.4)] sm:text-3xl lg:text-4xl">
                     {confirmedBooking ? t("bookingRecordedLabel") : t("bookingValidateInfo")}
                   </h2>
                 </div>
+                {confirmation && !confirmedBooking ? (
+                  <button
+                    type="button"
+                    onClick={backToTimeSelection}
+                    className="group inline-flex shrink-0 items-center gap-2 rounded-2xl border border-sky-100 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-sky-300 hover:text-sky-700"
+                  >
+                    <span className="transition group-hover:-translate-x-0.5">{isArabic ? "→" : "←"}</span>
+                    {t("bookingBack")}
+                  </button>
+                ) : null}
               </div>
 
               {!confirmation ? (
@@ -406,16 +424,16 @@ export function ReservationConfirmationPage() {
                     <SummaryCard label={t("bookingReference")} value={confirmedBooking.booking_reference} />
                     <SummaryCard label={t("bookingDate")} value={dateToLongLabel(confirmedBooking.booking_date, i18n.language as AppLanguage)} />
                     <SummaryCard label={t("bookingDetailsTime")} value={bookingRangeLabel} />
-                    <SummaryCard label={t("priceTotal")} value={`${confirmedBooking.total_price} DA`} />
+                    <SummaryCard label={t("priceTotal")} value={`${confirmedBooking.total_price} ${t("currency")}`} />
                   </div>
 
                   <div className="rounded-[2rem] border border-sky-100 bg-white p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
                     <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
                       <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.35em] text-sky-500">{t("bookingSummaryTitle")}</p>
+                        <p className="text-xs font-bold uppercase tracking-wide text-cyan-600">{t("bookingSummaryTitle")}</p>
                         <h3 className="mt-2 text-2xl font-black text-slate-900">{t("bookingReservationConfirmed")}</h3>
                       </div>
-                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.28em] text-emerald-700">
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-700">
                         {t("bookingConfirmedBadge")}
                       </span>
                     </div>
@@ -428,9 +446,9 @@ export function ReservationConfirmationPage() {
                     </div>
 
                     <div className="mt-5 rounded-[1.5rem] bg-slate-50 px-5 py-4">
-                      <p className="text-xs font-bold uppercase tracking-[0.3em] text-slate-400">{t("bookingStatusLabel")}</p>
-                      <p className="mt-2 text-lg font-semibold text-slate-900">{t("bookingHandledText")}</p>
-                      <p className="mt-2 text-sm font-semibold text-slate-500">
+                      <p className="text-xs font-bold uppercase tracking-wide text-cyan-600">{t("bookingStatusLabel")}</p>
+                      <p className="mt-2 text-lg font-black text-slate-900">{t("bookingHandledText")}</p>
+                      <p className="mt-2 text-sm font-bold text-slate-600">
                         {confirmedBooking.paymentMethod === "cash"
                           ? t("bookingPaymentCashNote")
                           : t("bookingPaymentBaridimobNote")}
@@ -440,46 +458,32 @@ export function ReservationConfirmationPage() {
                 </div>
               ) : (
                 <div className="flex flex-1 flex-col gap-6">
-                  <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid gap-3 sm:gap-4 md:grid-cols-2">
                     <SummaryCard label={t("clientName")} value={confirmation.clientName} />
                     <SummaryCard label={t("bookingDetailsEstablishment")} value={confirmation.establishmentName} />
-                    <SummaryCard label={t("address")} value={confirmation.establishmentAddress} className="md:col-span-2 xl:col-span-3" />
-                    <SummaryCard label={t("bookingDate")} value={`${bookingDateLabel} • ${bookingRangeLabel}`} className="md:col-span-2" />
+                    <SummaryCard label={t("address")} value={confirmation.establishmentAddress} className="md:col-span-2" />
+                    <SummaryCard label={t("bookingDate")} value={`${bookingDateLabel} • ${bookingRangeLabel}`} />
                     <SummaryCard label={t("bookingDetailsMode")} value={confirmation.modeLabel} />
                   </div>
 
                   <div className="rounded-[2rem] border border-sky-100 bg-white p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.35em] text-sky-500">{t("priceTotal")}</p>
-                        <p className="mt-2 text-3xl font-black text-slate-900">{confirmation.total_price} DA</p>
+                        <p className="text-xs font-bold uppercase tracking-wide text-cyan-600">{t("priceTotal")}</p>
+                        <p className="mt-2 text-3xl font-black text-slate-900">{confirmation.total_price} {t("currency")}</p>
                       </div>
                     </div>
 
                     <div className="mt-5 rounded-[1.5rem] border border-slate-100 bg-slate-50 p-4">
-                      <p className="text-[11px] font-bold uppercase tracking-[0.35em] text-sky-500">{t("bookingPaymentLabel")}</p>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                        <button
-                          type="button"
-                          onClick={() => setPaymentMethod("baridimob")}
-                          className={`rounded-[1.25rem] border px-4 py-3 text-left transition ${paymentMethod === "baridimob" ? "border-sky-500 bg-sky-50 text-sky-900 shadow-[0_14px_34px_rgba(14,165,233,0.16)]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <img src={baridiImg} alt="BaridiMob" className="h-8 w-8 rounded-lg object-cover shadow-sm" />
-                            <span className="block text-sm font-black">{t("bookingPaymentBaridimobLabel")}</span>
-                          </div>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setPaymentMethod("cash")}
-                          className={`rounded-[1.25rem] border px-4 py-3 text-left transition ${paymentMethod === "cash" ? "border-sky-500 bg-sky-50 text-sky-900 shadow-[0_14px_34px_rgba(14,165,233,0.16)]" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <img src={cashImg} alt="Cash" className="h-8 w-8 rounded-lg object-cover shadow-sm" />
-                            <span className="block text-sm font-black">{t("bookingPaymentCashLabel")}</span>
-                          </div>
-                        </button>
+                      <p className="text-xs font-bold uppercase tracking-wide text-cyan-600">{t("bookingPaymentLabel")}</p>
+                      <div className="mt-4">
+                        <div className="flex items-center gap-3 rounded-[1.25rem] border border-sky-500 bg-sky-50 px-4 py-3 text-sky-900 shadow-[0_14px_34px_rgba(14,165,233,0.16)]">
+                          <img src={cashImg} alt="Cash" className="h-8 w-8 rounded-lg object-cover shadow-sm" />
+                          <span className="block text-sm font-black">{t("bookingPaymentCashLabel")}</span>
+                          <span className="ml-auto flex h-6 w-6 items-center justify-center rounded-full bg-sky-500 text-white">
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                          </span>
+                        </div>
                       </div>
 
                       {checkingSlotAvailability ? (
@@ -492,48 +496,36 @@ export function ReservationConfirmationPage() {
                         {submissionError}
                       </div>
                     ) : null}
+                  </div>
 
-                    <p className="mt-6 text-sm font-semibold text-slate-600">
-                      {t("bookingConfirmQuestion")}
-                    </p>
+                  <p className="mt-6 text-xl font-black tracking-tight text-white drop-shadow-[0_2px_14px_rgba(2,6,23,0.4)] sm:text-2xl">
+                    {t("bookingConfirmQuestion")}
+                  </p>
 
-                    <div className={`mt-4 flex flex-col justify-end gap-3 sm:flex-row sm:flex-wrap ${isArabic ? "sm:flex-row-reverse" : ""}`}>
-                      <button
-                        type="button"
-                        onClick={backToDashboard}
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:-translate-y-0.5 hover:bg-slate-50 sm:w-auto"
-                      >
-                        {t("bookingCancel")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={backToTimeSelection}
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:-translate-y-0.5 hover:bg-slate-50 sm:w-auto"
-                      >
-                        {t("bookingModify")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={confirmReservation}
-                        disabled={submitting || checkingSlotAvailability || slotAvailable === false}
-                        className="w-full rounded-2xl bg-sky-600 px-6 py-3 text-sm font-bold text-white shadow-[0_16px_35px_rgba(14,165,233,0.28)] transition hover:-translate-y-0.5 hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300 sm:w-auto"
-                      >
-                        {submitting ? t("bookingLoading") : t("bookingConfirmButton")}
-                      </button>
-                    </div>
+                  <div className={`mt-4 flex justify-end ${isArabic ? "flex-row-reverse" : ""}`}>
+                    <button
+                      type="button"
+                      onClick={confirmReservation}
+                      disabled={submitting || checkingSlotAvailability || slotAvailable === false}
+                      className="w-full rounded-2xl bg-sky-600 px-8 py-3.5 text-sm font-bold text-white shadow-[0_16px_35px_rgba(14,165,233,0.28)] transition hover:-translate-y-0.5 hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-sky-300 sm:w-auto"
+                    >
+                      {submitting ? t("bookingLoading") : t("bookingConfirmButton")}
+                    </button>
                   </div>
                 </div>
               )}
 
-              <div className="mt-6 flex flex-col items-stretch justify-end gap-3 sm:flex-row sm:items-center">
-                <button
-                  type="button"
-                  onClick={backToDashboard}
-                  className="w-full rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white shadow-[0_16px_40px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:bg-slate-800 sm:ml-auto sm:w-auto"
-                >
-                  {t("bookingBackHome")}
-                </button>
-              </div>
+              {confirmedBooking ? (
+                <div className="mt-6 flex flex-col items-stretch justify-end gap-3 sm:flex-row sm:items-center">
+                  <button
+                    type="button"
+                    onClick={backToDashboard}
+                    className="w-full rounded-2xl bg-slate-900 px-5 py-3 text-sm font-bold text-white shadow-[0_16px_40px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:bg-slate-800 sm:ml-auto sm:w-auto"
+                  >
+                    {t("bookingBackHome")}
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
@@ -544,18 +536,18 @@ export function ReservationConfirmationPage() {
 
 function SummaryCard({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className={`rounded-[1.5rem] border border-slate-100 bg-slate-50/90 p-4 shadow-[0_10px_24px_rgba(15,23,42,0.04)] ${className ?? ""}`}>
-      <p className="text-[11px] font-bold uppercase tracking-[0.35em] text-sky-500">{label}</p>
-      <p className="mt-2 break-words text-base font-bold leading-6 text-slate-900">{value}</p>
+    <div className={`rounded-2xl border border-cyan-100 bg-white/95 p-4 shadow-[0_12px_30px_rgba(8,145,178,0.1)] ${className ?? ""}`}>
+      <p className="text-xs font-bold uppercase tracking-wide text-cyan-600">{label}</p>
+      <p className="mt-1.5 break-words text-base font-bold leading-6 text-slate-900">{value}</p>
     </div>
   );
 }
 
 function DetailRow({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className={`rounded-[1.25rem] border border-slate-100 bg-slate-50 px-4 py-3 ${className ?? ""}`}>
-      <p className="text-[11px] font-bold uppercase tracking-[0.35em] text-slate-400">{label}</p>
-      <p className="mt-2 text-sm font-semibold leading-6 text-slate-900">{value}</p>
+    <div className={`rounded-2xl border border-cyan-100 bg-white/95 px-4 py-3 ${className ?? ""}`}>
+      <p className="text-xs font-bold uppercase tracking-wide text-cyan-600">{label}</p>
+      <p className="mt-1.5 text-base font-bold leading-6 text-slate-900">{value}</p>
     </div>
   );
 }
@@ -621,7 +613,9 @@ async function resolveAvailableResourceId({
 
       const bookingStartMinutes = toMinutes(booking.start_time);
       const bookingEndMinutes = toMinutes(booking.end_time);
-      const overlaps = bookingStartMinutes < requestedEndMinutes && bookingEndMinutes > requestedStartMinutes;
+      const overlaps =
+        bookingStartMinutes < requestedEndMinutes + BOOKING_BUFFER_MINUTES &&
+        bookingEndMinutes > requestedStartMinutes - BOOKING_BUFFER_MINUTES;
       return overlaps && booking.resource === resource.id;
     });
 

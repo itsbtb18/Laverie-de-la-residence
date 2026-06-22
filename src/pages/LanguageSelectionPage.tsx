@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 
 import { ClientBrandPanel } from "../components/ClientBrandPanel";
+import backgroundImg from "../assets/background.png";
+import logoImg from "../assets/logo.png";
 import type { AppLanguage } from "../i18n";
 
 type LanguageSelectionPageProps = {
@@ -13,39 +15,51 @@ const languageCards: Array<{ code: AppLanguage; label: string }> = [
 ];
 
 export function LanguageSelectionPage({ onSelectLanguage }: LanguageSelectionPageProps) {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const tFr = i18n.getFixedT("fr");
   const tAr = i18n.getFixedT("ar");
 
   return (
     <main dir="ltr" className="relative min-h-screen w-full text-slate-900">
+      {/* Full-screen background photo (shared behind both columns) */}
+      <div
+        className="absolute inset-0 -z-20"
+        style={{
+          backgroundImage: `url(${backgroundImg})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      />
+      {/* Brand cyan tint across the whole screen for consistent text legibility */}
+      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-cyan-900/55 via-sky-900/45 to-slate-900/55" />
+
       <div className="grid min-h-screen w-full lg:grid-cols-[1.15fr_0.85fr] xl:grid-cols-[1.2fr_0.8fr]">
         {/* ---------- LEFT: bilingual brand panel (same template as login) ---------- */}
-        <ClientBrandPanel bilingual className="hidden lg:flex lg:min-h-screen" />
+        <ClientBrandPanel bilingual hideBackground className="hidden lg:flex lg:min-h-screen" />
 
         {/* ---------- RIGHT: language choice ---------- */}
-        <section className="relative flex min-h-screen w-full items-center justify-center overflow-y-auto bg-gradient-to-b from-slate-50 via-white to-slate-50/60 px-6 py-12 sm:px-10 lg:min-h-screen">
-          {/* Tech grid background pattern */}
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#0891b206_1px,transparent_1px),linear-gradient(to_bottom,#0891b206_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] pointer-events-none" />
-
-          {/* Premium glowing mesh accents */}
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute -translate-x-1/2 -translate-y-1/2 top-1/2 left-1/2 h-[500px] w-[500px] rounded-full bg-gradient-to-br from-cyan-300/10 to-transparent blur-[120px]" />
-            <div className="absolute right-[-10%] top-[-10%] h-[350px] w-[350px] rounded-full bg-cyan-200/15 blur-[90px]" />
-            <div className="absolute left-[-10%] bottom-[-10%] h-[350px] w-[350px] rounded-full bg-sky-200/20 blur-[95px]" />
-          </div>
-
+        <section className="relative flex min-h-screen w-full items-center justify-center overflow-y-auto px-6 py-12 sm:px-10 lg:min-h-screen">
           <div className="relative w-full max-w-sm">
+            {/* Mobile-only brand header — big logo + name, centered */}
+            <div className="mb-10 flex flex-col items-center text-center lg:hidden">
+              <span className="flex h-28 w-28 shrink-0 items-center justify-center rounded-[2rem] bg-white shadow-[0_20px_55px_rgba(2,6,23,0.4)] ring-1 ring-white/60 sm:h-32 sm:w-32">
+                <img src={logoImg} alt={t("appName")} className="h-20 w-auto sm:h-24" />
+              </span>
+              <p className="mt-5 text-3xl font-black tracking-tight text-white drop-shadow-[0_4px_20px_rgba(2,6,23,0.55)] sm:text-4xl">
+                {t("appName")}
+              </p>
+            </div>
+
             {/* Heading */}
             <div className="text-center animate-fade-in-up">
               <span className="inline-flex items-center gap-2 rounded-full border border-cyan-100 bg-cyan-50/60 px-4 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.35em] text-cyan-600 shadow-[0_2px_12px_rgba(6,182,212,0.08)] backdrop-blur-md">
                 <span className="h-1.5 w-1.5 rounded-full bg-cyan-500 animate-pulse" />
                 Langue / اللغة
               </span>
-              <h2 className="mt-6 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 bg-clip-text text-transparent">
+              <h2 className="mt-6 text-3xl font-black tracking-tight text-white drop-shadow-[0_4px_20px_rgba(2,6,23,0.55)] sm:text-4xl lg:text-4xl">
                 {tFr("chooseLanguageTitle")}
               </h2>
-              <p dir="rtl" lang="ar" className="mt-2 text-xl font-extrabold tracking-tight text-slate-400 sm:text-2xl">
+              <p dir="rtl" lang="ar" className="mt-2 text-3xl font-black tracking-tight text-white drop-shadow-[0_4px_20px_rgba(2,6,23,0.55)] sm:text-4xl">
                 {tAr("chooseLanguageTitle")}
               </p>
             </div>

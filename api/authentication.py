@@ -80,7 +80,10 @@ def build_login_response(user: CustomUser) -> dict[str, object]:
         "access_token": encode_jwt(payload),
         "token_type": "Bearer",
         "role": user.role,
-        "establishment_id": user.establishment_id if user.role == UserRole.ADMIN else None,
+        # Renvoyé pour les ADMIN comme pour les CLIENTS : un client est rattaché à
+        # un seul établissement, et la page de réservation ne doit afficher que les
+        # modes (et prix) de CET établissement. Reste None pour le super admin.
+        "establishment_id": user.establishment_id if user.role != UserRole.SUPER_ADMIN else None,
         "establishment_name": user.establishment.name if user.establishment_id else None,
         "user_id": user.id,
         "phone": user.phone,

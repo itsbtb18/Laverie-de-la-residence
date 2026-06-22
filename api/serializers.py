@@ -59,7 +59,9 @@ class EstablishmentSerializer(serializers.ModelSerializer):
         closing = attrs.get(
             "closing_time", getattr(self.instance, "closing_time", None)
         )
-        if opening and closing and opening >= closing:
+        # 00:00 (minuit) accepté comme fin de journée.
+        is_midnight = bool(closing) and closing.hour == 0 and closing.minute == 0
+        if opening and closing and not is_midnight and opening >= closing:
             raise serializers.ValidationError(
                 {"closing_time": "L'heure de fermeture doit être après l'heure d'ouverture."}
             )
@@ -141,10 +143,28 @@ class EstablishmentSerializer(serializers.ModelSerializer):
                 )
 
     def _sync_assistants(self, establishment, assistant_ids):
-        """Rattache les assistants sélectionnés à cet établissement."""
+        """Rattache les assistants sélectionnés à cet établissement.
+
+        Un assistant appartient à un et un seul établissement : on refuse tout
+        assistant déjà rattaché à un AUTRE établissement.
+        """
         ids = [int(a) for a in assistant_ids if a not in (None, "")]
         if not ids:
             return
+
+        conflicting = CustomUser.objects.filter(
+            id__in=ids, role=UserRole.ADMIN, establishment__isnull=False
+        ).exclude(establishment=establishment)
+        if conflicting.exists():
+            names = ", ".join(f"{a.first_name} {a.last_name}".strip() for a in conflicting)
+            raise serializers.ValidationError(
+                {
+                    "assistant_ids": [
+                        f"Ces assistants sont déjà affectés à un autre établissement : {names}."
+                    ]
+                }
+            )
+
         CustomUser.objects.filter(id__in=ids, role=UserRole.ADMIN).update(
             establishment=establishment
         )
@@ -646,13 +666,18 @@ class ModeLavageSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "nom",
+            "nom_ar",
             "duree",
             "prix_base",
             "capacite_max",
             "types_vetements",
+            "types_vetements_ar",
             "message_guide",
+            "message_guide_ar",
             "textiles_interdits",
+            "textiles_interdits_ar",
             "consigne_securite",
+            "consigne_securite_ar",
             "establishment_count",
             "created_at",
         ]
@@ -689,6 +714,12 @@ class ModeLavageSerializer(serializers.ModelSerializer):
 
     def validate_textiles_interdits(self, value):
         return self._normalize_str_list(value, "les textiles à éviter")
+
+    def validate_types_vetements_ar(self, value):
+        return self._normalize_str_list(value, "les textiles autorisés (arabe)")
+
+    def validate_textiles_interdits_ar(self, value):
+        return self._normalize_str_list(value, "les textiles à éviter (arabe)")
 
 
 class EtablissementModeSerializer(serializers.ModelSerializer):

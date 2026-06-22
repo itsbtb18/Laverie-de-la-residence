@@ -27,7 +27,7 @@ import logoImg from "../assets/logo.png";
 type SuperAdminDashboardPageProps = { language: "fr" | "ar" };
 
 type AssignedMode = { mode: number; nom: string; duree: number; prix_base: string | number; prix_specifique: string | number | null; prix_effectif: string | number; recommande?: boolean };
-type Establishment = { id: number; name: string; address: string; city: string; created_at: string; machine_count?: number; assigned_modes?: AssignedMode[] };
+type Establishment = { id: number; name: string; address: string; city: string; created_at: string; machine_count?: number; opening_time?: string; closing_time?: string; assigned_modes?: AssignedMode[] };
 
 type Assistant = {
   id: number; phone: string; first_name: string; last_name: string;
@@ -77,13 +77,18 @@ type ActiveTab = "overview" | "modes" | "establishments" | "assistants" | "histo
 type Mode = {
   id: number;
   nom: string;
+  nom_ar?: string;
   duree: number;
   prix_base: string | number;
   capacite_max: string | number;
   types_vetements: string[];
+  types_vetements_ar?: string[];
   message_guide: string;
+  message_guide_ar?: string;
   textiles_interdits?: string[];
+  textiles_interdits_ar?: string[];
   consigne_securite?: string;
+  consigne_securite_ar?: string;
   establishment_count?: number;
   created_at?: string;
 };
@@ -91,18 +96,24 @@ type Mode = {
 type ModeFormState = {
   id?: number;
   nom: string;
+  nom_ar: string;
   duree: string;
   prix_base: string;
   capacite_max: string;
   types_vetements: string; // saisie séparée par des virgules
+  types_vetements_ar: string;
   message_guide: string;
+  message_guide_ar: string;
   textiles_interdits: string; // saisie séparée par des virgules
+  textiles_interdits_ar: string;
   consigne_securite: string;
+  consigne_securite_ar: string;
 };
 
 type ModeAssignment = { checked: boolean; price: string; recommande: boolean };
 type EstablishmentFormState = {
   id?: number; name: string; address: string; city: string; machine_count: number;
+  opening_time: string; closing_time: string;
   // Modes attribués à cet établissement (clé = id du mode)
   modeAssignments: Record<number, ModeAssignment>;
   // Assistants rattachés à cet établissement
@@ -168,6 +179,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
   const [error, setError] = useState<string | null>(null);
   const [refreshCounter, setRefreshCounter] = useState(0);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Overview establishment filter (null = all)
   const [overviewEstFilter, setOverviewEstFilter] = useState<number | null>(null);
@@ -194,13 +206,13 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
   // Modes
   const [modeSearch, setModeSearch] = useState("");
   const [modeModalMode, setModeModalMode] = useState<ModalMode | null>(null);
-  const [modeForm, setModeForm] = useState<ModeFormState>({ nom: "", duree: "", prix_base: "", capacite_max: "", types_vetements: "", message_guide: "", textiles_interdits: "", consigne_securite: "" });
+  const [modeForm, setModeForm] = useState<ModeFormState>({ nom: "", nom_ar: "", duree: "", prix_base: "", capacite_max: "", types_vetements: "", types_vetements_ar: "", message_guide: "", message_guide_ar: "", textiles_interdits: "", textiles_interdits_ar: "", consigne_securite: "", consigne_securite_ar: "" });
   const [savingMode, setSavingMode] = useState(false);
 
   // Modals
   const [establishmentModalMode, setEstablishmentModalMode] = useState<ModalMode | null>(null);
   const [assistantModalMode, setAssistantModalMode] = useState<ModalMode | null>(null);
-  const [establishmentForm, setEstablishmentForm] = useState<EstablishmentFormState>({ name: "", address: "", city: "", machine_count: 0, modeAssignments: {}, assistantIds: [], withAssistant: false, assistantFirstName: "", assistantLastName: "", assistantPhone: "", assistantSecretCode: "" });
+  const [establishmentForm, setEstablishmentForm] = useState<EstablishmentFormState>({ name: "", address: "", city: "", machine_count: 0, opening_time: "08:00", closing_time: "22:00", modeAssignments: {}, assistantIds: [], withAssistant: false, assistantFirstName: "", assistantLastName: "", assistantPhone: "", assistantSecretCode: "" });
   // Recherche dans les dropdowns d'affectation (modes & assistants) du modal établissement
   const [modeAssignSearch, setModeAssignSearch] = useState("");
   const [modeDropdownOpen, setModeDropdownOpen] = useState(false);
@@ -274,20 +286,30 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
 
   /* ── Computed ── */
   const overviewMetrics = useMemo(() => {
-    const totalRevenue = history.reduce((s, i) => s + Number(i.total_price || 0), 0);
+    // Seuls les rendez-vous validés (payés) comptent dans le revenu total.
+    const totalRevenue = history.filter((i) => i.status === "PAYE").reduce((s, i) => s + Number(i.total_price || 0), 0);
     const saturatedCount = stats.filter((i) => Number(i.saturation_percentage) > 80).length;
     return { establishments: establishments.length, assistants: assistants.length, revenue: totalRevenue, saturatedCount };
   }, [establishments.length, history, assistants.length, stats]);
 
+  // Un rendez-vous n'apparaît dans le journal qu'une fois VALIDÉ (payé).
+  // - PAYE : affiché (transaction réelle)
+  // - ANNULE : affiché uniquement s'il avait été validé avant l'annulation
+  // - EN_ATTENTE : jamais affiché
+  // - MAINTENANCE : événement opérationnel, conservé
+  const isAuditable = (item: FinancialHistoryItem) =>
+    item.status === "PAYE" ||
+    item.status === "MAINTENANCE";
+
   const filteredHistory = useMemo(() => {
     return history.filter((item) => {
+      if (!isAuditable(item)) return false;
       const phoneMatch = !historyPhoneSearch.trim() || (item.client?.phone ?? "").includes(historyPhoneSearch.trim());
       const estMatch = historyEstablishmentFilter === "all" || String(item.establishment_id) === historyEstablishmentFilter;
       const dateMatch = !historyDateFilter || item.booking_date === historyDateFilter;
       let kindMatch = true;
       if (historyKind === "cash") kindMatch = item.status === "PAYE" && item.payment_method === "CASH";
       else if (historyKind === "baridimob") kindMatch = item.status === "PAYE" && item.payment_method === "BARIDIMOB";
-      else if (historyKind === "reservation") kindMatch = item.status === "EN_ATTENTE";
       else if (historyKind === "cancellation") kindMatch = item.status === "ANNULE";
       else if (historyKind === "maintenance") kindMatch = item.status === "MAINTENANCE";
       return phoneMatch && estMatch && dateMatch && kindMatch;
@@ -296,6 +318,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
 
   const historyKindCounts = useMemo(() => {
     const base = history.filter((item) => {
+      if (!isAuditable(item)) return false;
       const phoneMatch = !historyPhoneSearch.trim() || (item.client?.phone ?? "").includes(historyPhoneSearch.trim());
       const estMatch = historyEstablishmentFilter === "all" || String(item.establishment_id) === historyEstablishmentFilter;
       const dateMatch = !historyDateFilter || item.booking_date === historyDateFilter;
@@ -305,7 +328,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
       all: base.length,
       cash: base.filter((i) => i.status === "PAYE" && i.payment_method === "CASH").length,
       baridimob: base.filter((i) => i.status === "PAYE" && i.payment_method === "BARIDIMOB").length,
-      reservation: base.filter((i) => i.status === "EN_ATTENTE").length,
+      reservation: 0,
       cancellation: base.filter((i) => i.status === "ANNULE").length,
       maintenance: base.filter((i) => i.status === "MAINTENANCE").length,
     } as Record<HistoryKind, number>;
@@ -333,7 +356,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
   }, [stats, overviewEstFilter]);
 
   /* ── CRUD Handlers ── */
-  const openCreateEstablishment = () => { setModeAssignSearch(""); setAssistantAssignSearch(""); setModeDropdownOpen(false); setAssistantDropdownOpen(false); setEstablishmentForm({ name: "", address: "", city: "", machine_count: 0, modeAssignments: {}, assistantIds: [], withAssistant: false, assistantFirstName: "", assistantLastName: "", assistantPhone: "", assistantSecretCode: "" }); setEstablishmentModalMode("create"); };
+  const openCreateEstablishment = () => { setModeAssignSearch(""); setAssistantAssignSearch(""); setModeDropdownOpen(false); setAssistantDropdownOpen(false); setEstablishmentForm({ name: "", address: "", city: "", machine_count: 0, opening_time: "08:00", closing_time: "22:00", modeAssignments: {}, assistantIds: [], withAssistant: false, assistantFirstName: "", assistantLastName: "", assistantPhone: "", assistantSecretCode: "" }); setEstablishmentModalMode("create"); };
   const openEditEstablishment = (est: Establishment) => {
     const modeAssignments: Record<number, ModeAssignment> = {};
     (est.assigned_modes ?? []).forEach((am) => {
@@ -348,6 +371,8 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
     setEstablishmentForm({
       id: est.id, name: est.name, address: est.address, city: est.city,
       machine_count: est.machine_count ?? 0,
+      opening_time: (est.opening_time ?? "08:00").slice(0, 5),
+      closing_time: (est.closing_time ?? "22:00").slice(0, 5),
       modeAssignments,
       assistantIds,
       withAssistant: false, assistantFirstName: "", assistantLastName: "", assistantPhone: "", assistantSecretCode: "",
@@ -357,7 +382,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
 
   /* ── Mode handlers ── */
   const openCreateMode = () => {
-    setModeForm({ nom: "", duree: "", prix_base: "", capacite_max: "", types_vetements: "", message_guide: "", textiles_interdits: "", consigne_securite: "" });
+    setModeForm({ nom: "", nom_ar: "", duree: "", prix_base: "", capacite_max: "", types_vetements: "", types_vetements_ar: "", message_guide: "", message_guide_ar: "", textiles_interdits: "", textiles_interdits_ar: "", consigne_securite: "", consigne_securite_ar: "" });
     setModeModalMode("create");
   };
 
@@ -365,13 +390,18 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
     setModeForm({
       id: mode.id,
       nom: mode.nom,
+      nom_ar: mode.nom_ar ?? "",
       duree: String(mode.duree ?? ""),
       prix_base: String(mode.prix_base ?? ""),
       capacite_max: String(mode.capacite_max ?? ""),
       types_vetements: Array.isArray(mode.types_vetements) ? mode.types_vetements.join(", ") : "",
+      types_vetements_ar: Array.isArray(mode.types_vetements_ar) ? mode.types_vetements_ar.join("، ") : "",
       message_guide: mode.message_guide ?? "",
+      message_guide_ar: mode.message_guide_ar ?? "",
       textiles_interdits: Array.isArray(mode.textiles_interdits) ? mode.textiles_interdits.join(", ") : "",
+      textiles_interdits_ar: Array.isArray(mode.textiles_interdits_ar) ? mode.textiles_interdits_ar.join("، ") : "",
       consigne_securite: mode.consigne_securite ?? "",
+      consigne_securite_ar: mode.consigne_securite_ar ?? "",
     });
     setModeModalMode("edit");
   };
@@ -379,18 +409,26 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
   const saveMode = async () => {
     const nom = modeForm.nom.trim();
     const duree = parseInt(modeForm.duree, 10);
-    if (!nom) { setError(t("modeNameRequired")); return; }
-    if (!duree || duree <= 0) { setError(t("modeDurationRequired")); return; }
+    if (!nom) { showError(t("modeNameRequired")); return; }
+    if (!duree || duree <= 0) { showError(t("modeDurationRequired")); return; }
+
+    const splitList = (raw: string) =>
+      raw.split(/[,،]/).map((v) => v.trim()).filter(Boolean);
 
     const payload = {
       nom,
+      nom_ar: modeForm.nom_ar.trim(),
       duree,
       prix_base: Number(modeForm.prix_base || 0),
       capacite_max: Number(modeForm.capacite_max || 0),
-      types_vetements: modeForm.types_vetements.split(",").map((v) => v.trim()).filter(Boolean),
+      types_vetements: splitList(modeForm.types_vetements),
+      types_vetements_ar: splitList(modeForm.types_vetements_ar),
       message_guide: modeForm.message_guide.trim(),
-      textiles_interdits: modeForm.textiles_interdits.split(",").map((v) => v.trim()).filter(Boolean),
+      message_guide_ar: modeForm.message_guide_ar.trim(),
+      textiles_interdits: splitList(modeForm.textiles_interdits),
+      textiles_interdits_ar: splitList(modeForm.textiles_interdits_ar),
       consigne_securite: modeForm.consigne_securite.trim(),
+      consigne_securite_ar: modeForm.consigne_securite_ar.trim(),
     };
     const endpoint = modeModalMode === "edit" && modeForm.id
       ? `/api/superadmin/modes/${modeForm.id}/`
@@ -401,7 +439,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
       setModeModalMode(null);
       showSuccess(modeModalMode === "edit" ? t("modeUpdated") : t("modeCreated"));
       refresh();
-    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    } catch (e) { showError(e instanceof Error ? e.message : "Erreur"); }
     finally { setSavingMode(false); }
   };
 
@@ -411,7 +449,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
       await superAdminFetch(`/api/superadmin/modes/${mode.id}/`, { method: "DELETE" });
       setModes((prev) => prev.filter((m) => m.id !== mode.id));
       showSuccess(t("modeDeleted"));
-    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    } catch (e) { showError(e instanceof Error ? e.message : "Erreur"); }
   };
 
   const openCreateAssistant = () => {
@@ -443,10 +481,14 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
       address: establishmentForm.address.trim(),
       city: establishmentForm.city.trim(),
       machine_count: Number(establishmentForm.machine_count || 0),
+      opening_time: establishmentForm.opening_time,
+      closing_time: establishmentForm.closing_time,
       modes: modesPayload,
       assistant_ids: establishmentForm.assistantIds,
     };
     if (!payload.name || !payload.address || !payload.city) return;
+    // 00:00 = minuit (fin de journée) est accepté
+    if (payload.closing_time !== "00:00" && payload.opening_time >= payload.closing_time) { showError("L'heure de fermeture doit être après l'heure d'ouverture."); return; }
     const endpoint = establishmentModalMode === "edit" && establishmentForm.id
       ? `/api/superadmin/establishments/${establishmentForm.id}/`
       : "/api/superadmin/establishments/";
@@ -470,13 +512,13 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
       setEstablishmentModalMode(null);
       showSuccess(establishmentModalMode === "edit" ? "Établissement mis à jour." : "Établissement créé avec succès !");
       refresh();
-    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    } catch (e) { showError(e instanceof Error ? e.message : "Erreur"); }
   };
 
   const saveAssistant = async () => {
     const secretCode = assistantForm.secret_code.trim();
     if (assistantModalMode === "create" && !secretCode) {
-      setError(t("secretCodeRequired"));
+      showError(t("secretCodeRequired"));
       return;
     }
 
@@ -491,7 +533,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
       setAssistantModalMode(null);
       showSuccess(assistantModalMode === "edit" ? t("save") : t("addAssistant"));
       refresh();
-    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    } catch (e) { showError(e instanceof Error ? e.message : "Erreur"); }
   };
 
   const deleteEstablishment = async (id: number) => {
@@ -531,7 +573,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
     try {
       await superAdminFetch("/api/superadmin/config/", { method: "PUT", body: JSON.stringify(systemConfig) });
       showSuccess("Configuration enregistrée.");
-    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    } catch (e) { showError(e instanceof Error ? e.message : "Erreur"); }
     finally { setSavingConfig(false); }
   };
 
@@ -548,7 +590,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
       const res = await superAdminFetch("/api/superadmin/super-admins/");
       const data = await safeJson<Assistant[]>(res);
       if (data) setSuperAdmins(data);
-    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    } catch (e) { showError(e instanceof Error ? e.message : "Erreur"); }
     finally { setSavingSa(false); }
   };
 
@@ -558,12 +600,13 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
       await superAdminFetch(`/api/superadmin/super-admins/${id}/`, { method: "DELETE" });
       setSuperAdmins((prev) => prev.filter((sa) => sa.id !== id));
       showSuccess("Super admin supprimé.");
-    } catch (e) { setError(e instanceof Error ? e.message : "Erreur"); }
+    } catch (e) { showError(e instanceof Error ? e.message : "Erreur"); }
   };
 
   const handleLogout = () => { clearAuthSession(); navigate("/staff/login", { replace: true }); };
 
   const showSuccess = (msg: string) => { setSuccessMessage(msg); setTimeout(() => setSuccessMessage(null), 3000); };
+  const showError = (msg: string) => { setErrorMessage(msg); setTimeout(() => setErrorMessage(null), 4000); };
 
   /* ── Sidebar Tabs Config ── */
   const tabs: Array<{ key: ActiveTab; label: string; icon: React.ReactNode }> = [
@@ -689,8 +732,17 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
         <div className="p-4 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
           {/* Success toast */}
           {successMessage && (
-            <div className="fixed top-20 right-6 z-50 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700 shadow-lg animate-scale-in">
+            <div className="fixed top-20 right-6 z-[60] rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700 shadow-lg animate-scale-in">
               ✅ {successMessage}
+            </div>
+          )}
+
+          {/* Error toast (notification — reste au-dessus des modals) */}
+          {errorMessage && (
+            <div className="fixed top-20 right-6 z-[60] flex max-w-sm items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-700 shadow-lg animate-scale-in">
+              <span className="mt-0.5 shrink-0">⚠️</span>
+              <span>{errorMessage}</span>
+              <button type="button" onClick={() => setErrorMessage(null)} className="ml-1 shrink-0 text-rose-400 transition hover:text-rose-600">✕</button>
             </div>
           )}
 
@@ -1286,7 +1338,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
                         return (
                           <div
                             key={est.id}
-                            onClick={() => { setManagedEstablishment({ id: est.id, name: est.name }); navigate("/admin/dashboard/calendar"); }}
+                            onClick={() => { setManagedEstablishment({ id: est.id, name: est.name }); navigate("/admin/dashboard/creation"); }}
                             className="group relative flex flex-col overflow-hidden rounded-3xl border border-sky-100/80 bg-white shadow-[0_4px_20px_rgba(14,165,233,0.06)] hover:shadow-[0_12px_36px_rgba(14,165,233,0.14)] transition-all duration-300 hover:-translate-y-1 animate-fade-in-up cursor-pointer"
                             style={{ animationDelay: `${idx * 60}ms` }}
                           >
@@ -1362,7 +1414,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
                             <div className="border-t border-sky-50 bg-sky-50/30 p-3 space-y-2">
                               <button
                                 type="button"
-                                onClick={(e) => { e.stopPropagation(); setManagedEstablishment({ id: est.id, name: est.name }); navigate("/admin/dashboard/calendar"); }}
+                                onClick={(e) => { e.stopPropagation(); setManagedEstablishment({ id: est.id, name: est.name }); navigate("/admin/dashboard/creation"); }}
                                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 via-indigo-500 to-cyan-500 px-4 py-2.5 text-sm font-bold text-white shadow-[0_6px_20px_rgba(14,165,233,0.25)] transition hover:-translate-y-0.5 hover:shadow-[0_10px_28px_rgba(14,165,233,0.35)] cursor-pointer"
                               >
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
@@ -1719,8 +1771,6 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
                       { key: "all", label: "Tout", color: "from-slate-600 to-slate-700" },
                       { key: "cash", label: "Paiements espèces", color: "from-emerald-500 to-teal-600" },
                       { key: "baridimob", label: "Paiements BaridiMob", color: "from-sky-500 to-blue-600" },
-                      { key: "reservation", label: "Réservations en attente", color: "from-amber-500 to-orange-600" },
-                      { key: "cancellation", label: "Annulations", color: "from-rose-500 to-pink-600" },
                       { key: "maintenance", label: "Maintenances", color: "from-violet-500 to-purple-600" },
                     ] as { key: HistoryKind; label: string; color: string }[]).map((tab) => (
                       <button
@@ -1761,7 +1811,8 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
                                   <span>Poste bloqué — {item.establishment_name}</span>
                                 ) : (
                                   <>
-                                    {t("transactionLine")} <span className="font-bold text-emerald-700">{item.total_price} DA</span> — {item.establishment_name}
+                                    {item.status === "ANNULE" ? "Annulé après paiement de " : t("transactionLine") + " "}
+                                    <span className={`font-bold ${item.status === "ANNULE" ? "text-rose-600 line-through" : "text-emerald-700"}`}>{item.total_price} DA</span> — {item.establishment_name}
                                     {item.status === "PAYE" && item.payment_method && (
                                       <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
                                         {item.payment_method === "BARIDIMOB" ? "BaridiMob" : "Espèces"}
@@ -1937,10 +1988,6 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                         {[
-                          { label: "Heure d'ouverture", value: "08:00" },
-                          { label: "Heure de fermeture", value: "22:00" },
-                          { label: "Prix / minute", value: "15 DA" },
-                          { label: "Créneau minimum", value: "15 min" },
                           { label: "Établissements", value: String(establishments.length) },
                           { label: "Assistants actifs", value: String(assistants.length) },
                         ].map((info) => (
@@ -1971,8 +2018,9 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
           <div className="grid gap-5">
             {/* Section 1 — Fiche technique */}
             <div className="grid gap-4">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-600">1 · Fiche technique</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-600">{t("modeSection1")}</p>
               <TextInput label={t("modeName")} value={modeForm.nom} onChange={(v) => setModeForm((s) => ({ ...s, nom: v }))} placeholder="ex. Lavage Délicat" />
+              <TextInput label={`${t("modeName")} (AR)`} value={modeForm.nom_ar} onChange={(v) => setModeForm((s) => ({ ...s, nom_ar: v }))} placeholder="مثال: غسيل سريع" dir="rtl" />
               <div className="grid grid-cols-3 gap-3">
                 <TextInput label={t("modeDurationField")} value={modeForm.duree} onChange={(v) => setModeForm((s) => ({ ...s, duree: v.replace(/[^0-9]/g, "") }))} placeholder="30" />
                 <TextInput label={t("modePriceField")} value={modeForm.prix_base} onChange={(v) => setModeForm((s) => ({ ...s, prix_base: v.replace(/[^0-9.]/g, "") }))} placeholder="200" />
@@ -1982,7 +2030,7 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
 
             {/* Section 2 — Pourquoi choisir ce mode */}
             <div>
-              <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500">2 · Pourquoi choisir ce mode ?</p>
+              <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500">{t("modeSection2")}</p>
               <textarea
                 value={modeForm.message_guide}
                 onChange={(e) => setModeForm((s) => ({ ...s, message_guide: e.target.value }))}
@@ -1990,24 +2038,45 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
                 rows={2}
                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-300 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 hover:border-sky-200 resize-none"
               />
+              <textarea
+                value={modeForm.message_guide_ar}
+                dir="rtl"
+                onChange={(e) => setModeForm((s) => ({ ...s, message_guide_ar: e.target.value }))}
+                placeholder="لماذا تختار هذا الوضع؟"
+                rows={2}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-300 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 hover:border-sky-200 resize-none"
+              />
             </div>
 
             {/* Section 3 — Textiles autorisés */}
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
-              <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600">3 · Ce que l'on peut laver ✅</p>
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 space-y-3">
+              <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600">{t("modeSection3")}</p>
               <TextInput label={t("modeAllowedField")} value={modeForm.types_vetements} onChange={(v) => setModeForm((s) => ({ ...s, types_vetements: v }))} placeholder="ex. Coton, T-shirts, Sous-vêtements" />
+              <TextInput label={`${t("modeAllowedField")} (AR)`} value={modeForm.types_vetements_ar} onChange={(v) => setModeForm((s) => ({ ...s, types_vetements_ar: v }))} placeholder="مثال: قطن، قمصان، ملابس داخلية" dir="rtl" />
             </div>
 
             {/* Section 4 — À éviter + consigne */}
             <div className="rounded-2xl border border-rose-100 bg-rose-50/40 p-4 space-y-3">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-600">4 · À éviter / vérifier ❌⚠️</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-600">{t("modeSection4")}</p>
               <TextInput label={t("modeForbiddenField")} value={modeForm.textiles_interdits} onChange={(v) => setModeForm((s) => ({ ...s, textiles_interdits: v }))} placeholder="ex. Laine, Soie, Cuir" />
+              <TextInput label={`${t("modeForbiddenField")} (AR)`} value={modeForm.textiles_interdits_ar} onChange={(v) => setModeForm((s) => ({ ...s, textiles_interdits_ar: v }))} placeholder="مثال: صوف، حرير، جلد" dir="rtl" />
               <label className="block">
                 <span className="block text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400 mb-1.5">{t("modeSafetyField")}</span>
                 <textarea
                   value={modeForm.consigne_securite}
                   onChange={(e) => setModeForm((s) => ({ ...s, consigne_securite: e.target.value }))}
                   placeholder={t("modeSafetyPlaceholder")}
+                  rows={2}
+                  className="w-full rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-100 resize-none"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400 mb-1.5">{t("modeSafetyField")} (AR)</span>
+                <textarea
+                  value={modeForm.consigne_securite_ar}
+                  dir="rtl"
+                  onChange={(e) => setModeForm((s) => ({ ...s, consigne_securite_ar: e.target.value }))}
+                  placeholder="مثال: أفرغ الجيوب وأزل الرمل قبل الغسل."
                   rows={2}
                   className="w-full rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-100 resize-none"
                 />
@@ -2054,6 +2123,28 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
                       className={`h-7 w-7 rounded-lg text-xs font-bold transition ${establishmentForm.machine_count === n ? "bg-sky-500 text-white shadow-sm" : "bg-sky-50 text-sky-600 hover:bg-sky-100"}`}>{n}</button>
                   ))}
                 </div>
+              </div>
+
+              {/* Heures de travail */}
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="block text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400 mb-1.5">Heure d'ouverture</span>
+                  <input
+                    type="time"
+                    value={establishmentForm.opening_time}
+                    onChange={(e) => setEstablishmentForm((s) => ({ ...s, opening_time: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 hover:border-sky-200"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400 mb-1.5">Heure de fermeture</span>
+                  <input
+                    type="time"
+                    value={establishmentForm.closing_time}
+                    onChange={(e) => setEstablishmentForm((s) => ({ ...s, closing_time: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 hover:border-sky-200"
+                  />
+                </label>
               </div>
             </div>
           </div>
@@ -2266,6 +2357,9 @@ export function SuperAdminDashboardPage({ language }: SuperAdminDashboardPagePro
                 const q = assistantAssignSearch.toLowerCase();
                 const available = assistants.filter((a) =>
                   !establishmentForm.assistantIds.includes(a.id) &&
+                  // Seuls les assistants NON affectés (ou déjà rattachés à cet établissement)
+                  // peuvent être proposés : un assistant appartient à un seul établissement.
+                  (!a.establishment || a.establishment === establishmentForm.id) &&
                   (`${a.first_name} ${a.last_name}`.toLowerCase().includes(q) || (a.phone ?? "").includes(assistantAssignSearch))
                 );
                 return (
@@ -2535,12 +2629,13 @@ function ModalShell({ title, subtitle, icon, children, onClose }: { title: strin
   );
 }
 
-function TextInput({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+function TextInput({ label, value, onChange, placeholder, dir }: { label: string; value: string; onChange: (v: string) => void; placeholder: string; dir?: "ltr" | "rtl" }) {
   return (
     <label className="block">
       <span className="block text-[11px] font-bold uppercase tracking-[0.15em] text-slate-400 mb-1.5">{label}</span>
       <input
         value={value}
+        dir={dir}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-300

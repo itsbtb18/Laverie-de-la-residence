@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { authHeader, getAuthSession } from "../auth/session";
+import { localizeResourceLabel, type AppLanguage } from "../i18n";
 import { ClientBrandPanel } from "../components/ClientBrandPanel";
 
 type PaymentStatus = "checking" | "paid" | "failed" | "error";
@@ -18,7 +19,7 @@ type BookingInfo = {
 };
 
 export function PaymentSuccessPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const bookingId = searchParams.get("booking_id");
@@ -174,8 +175,8 @@ export function PaymentSuccessPage() {
                   <div className="grid grid-cols-2 gap-px bg-slate-100">
                     <InfoCell label="Date" value={new Date(`${bookingInfo.booking_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" })} />
                     <InfoCell label="Horaire" value={`${bookingInfo.start_time} – ${bookingInfo.end_time}`} />
-                    <InfoCell label="Machine" value={bookingInfo.resource_label} />
-                    <InfoCell label="Total payé" value={`${bookingInfo.total_price} DA`} highlight />
+                    <InfoCell label={t("machineLabel")} value={localizeResourceLabel(bookingInfo.resource_label, i18n.language as AppLanguage)} />
+                    <InfoCell label={t("priceTotal")} value={`${bookingInfo.total_price} ${t("currency")}`} highlight />
                   </div>
                   <div className="px-5 py-3.5">
                     <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-sky-500">Établissement</p>

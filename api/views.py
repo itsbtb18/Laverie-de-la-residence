@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.db.models.functions import ExtractHour, ExtractWeekDay
+from django.db.models.functions import Coalesce, ExtractHour, ExtractWeekDay
 from django.utils import timezone
 from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
@@ -54,6 +54,12 @@ from .whatsapp_service import notify_booking_confirmation, notify_welcome_accoun
 OPENING_TIME = time(8, 0)
 CLOSING_TIME = time(22, 0)
 DEFAULT_SLOT_STEP_MINUTES = 15
+# Marge tampon (en minutes) imposée APRÈS chaque réservation pour laisser au
+# client le temps de récupérer son linge avant le début du créneau suivant sur
+# la même machine. Ex. : un rendez-vous finissant à 08:15 bloque la ressource
+# jusqu'à 08:20. Appliquée symétriquement (gap des deux côtés) à toute la
+# détection de chevauchement : disponibilités ET création/modification.
+BOOKING_BUFFER_MINUTES = 5
 PRICE_PER_MINUTE = Decimal("15.00")
 WEEKDAY_COUNT = 7
 WORKING_DAY_SLOT_COUNT = int(
@@ -65,9 +71,43 @@ def _minutes(t: time) -> int:
     return t.hour * 60 + t.minute
 
 
+def _shift_time(t: time, minutes: int) -> time:
+    """Décale une heure de `minutes` (peut être négatif), borné à [00:00, 23:59]."""
+    total = max(0, min(t.hour * 60 + t.minute + minutes, 23 * 60 + 59))
+    return time(total // 60, total % 60)
+
+
+def _is_midnight(t: time) -> bool:
+    return t.hour == 0 and t.minute == 0
+
+
+def _closing_minutes(closing: time) -> int:
+    """00:00 (minuit) est interprété comme la fin de journée (24:00)."""
+    return 24 * 60 if _is_midnight(closing) else _minutes(closing)
+
+
+def _closing_datetime(day, closing: time) -> datetime:
+    """Datetime de fermeture, en gérant minuit (00:00 = lendemain 00:00)."""
+    if _is_midnight(closing):
+        return datetime.combine(day, time(0, 0)) + timedelta(days=1)
+    return datetime.combine(day, closing)
+
+
+def _slot_window_end(day, closing: time) -> datetime:
+    """Borne supérieure pour la FIN des créneaux réservables.
+
+    Un rendez-vous doit avoir start_time < end_time (même journée) : un créneau
+    finissant pile à minuit (00:00) n'est donc pas réservable. Quand la fermeture
+    est à minuit, on plafonne la fin des créneaux à 23:59 le même jour.
+    """
+    if _is_midnight(closing):
+        return datetime.combine(day, time(23, 59))
+    return datetime.combine(day, closing)
+
+
 def _working_day_slot_count(opening: time, closing: time) -> int:
     """Nombre de créneaux (pas de 15 min) sur une journée de travail."""
-    span = _minutes(closing) - _minutes(opening)
+    span = _closing_minutes(closing) - _minutes(opening)
     return max(int(span / DEFAULT_SLOT_STEP_MINUTES), 0)
 
 
@@ -111,6 +151,11 @@ def _active_resources_count(establishment_id: int) -> int:
 def _overlapping_bookings_queryset(
     establishment_id: int, booking_date, start_time, end_time
 ):
+    # On élargit l'intervalle demandé de BOOKING_BUFFER_MINUTES de chaque côté
+    # afin d'imposer une marge tampon entre deux réservations consécutives sur
+    # la même ressource (le temps de retirer le linge).
+    start_buffered = _shift_time(start_time, -BOOKING_BUFFER_MINUTES)
+    end_buffered = _shift_time(end_time, BOOKING_BUFFER_MINUTES)
     return (
         Booking.objects.select_for_update()
         .filter(
@@ -118,7 +163,7 @@ def _overlapping_bookings_queryset(
             booking_date=booking_date,
         )
         .exclude(status=BookingStatus.ANNULE)
-        .filter(start_time__lt=end_time, end_time__gt=start_time)
+        .filter(start_time__lt=end_buffered, end_time__gt=start_buffered)
     )
 
 
@@ -144,14 +189,19 @@ class EstablishmentViewSet(viewsets.ModelViewSet):
             {
                 "id": link.mode_id,
                 "nom": link.mode.nom,
+                "nom_ar": link.mode.nom_ar,
                 "duree": link.mode.duree,
                 "prix_base": link.mode.prix_base,
                 "prix_effectif": link.prix_effectif,
                 "capacite_max": link.mode.capacite_max,
                 "types_vetements": link.mode.types_vetements,
+                "types_vetements_ar": link.mode.types_vetements_ar,
                 "message_guide": link.mode.message_guide,
+                "message_guide_ar": link.mode.message_guide_ar,
                 "textiles_interdits": link.mode.textiles_interdits,
+                "textiles_interdits_ar": link.mode.textiles_interdits_ar,
                 "consigne_securite": link.mode.consigne_securite,
+                "consigne_securite_ar": link.mode.consigne_securite_ar,
                 "recommande": link.recommande,
             }
             for link in links
@@ -227,11 +277,46 @@ class CustomUserViewSet(viewsets.ModelViewSet):
                 | Q(first_name__icontains=search)
                 | Q(last_name__icontains=search)
             )
+
+        # Isolation par établissement : un client appartient à un et un seul
+        # établissement. Un assistant (ADMIN) ne voit QUE les clients de son
+        # propre établissement ; le super admin filtre via establishment_id
+        # (l'établissement qu'il est en train de gérer).
+        if role == UserRole.CUSTOMER:
+            requester = self.request.user
+            if getattr(requester, "role", None) == UserRole.ADMIN:
+                queryset = queryset.filter(
+                    establishment_id=requester.establishment_id
+                )
+            else:
+                establishment_id = self.request.query_params.get("establishment_id")
+                if establishment_id:
+                    queryset = queryset.filter(establishment_id=establishment_id)
         return queryset
 
     def perform_create(self, serializer):
         created_in_person = serializer.validated_data.get("created_in_person", False)
-        user = serializer.save()
+
+        # Un client créé sur place est automatiquement rattaché à l'établissement
+        # de l'assistant (ou super admin) qui le crée, s'il n'est pas déjà fourni.
+        extra = {}
+        role = serializer.validated_data.get("role", UserRole.CUSTOMER)
+        provided_establishment = serializer.validated_data.get("establishment")
+        creator_establishment_id = getattr(self.request.user, "establishment_id", None)
+        if role == UserRole.CUSTOMER and provided_establishment is None:
+            # L'assistant rattache au sien ; le super admin doit fournir l'établissement géré.
+            if creator_establishment_id:
+                extra["establishment_id"] = creator_establishment_id
+
+        # Un client doit obligatoirement appartenir à un établissement.
+        if role == UserRole.CUSTOMER and (
+            provided_establishment is None and not extra.get("establishment_id")
+        ):
+            raise ValidationError(
+                {"establishment": "Un client doit être rattaché à un établissement."}
+            )
+
+        user = serializer.save(**extra)
 
         if user.role == UserRole.CUSTOMER:
             notify_welcome_account(user, user.secret_code_plain or None)
@@ -367,11 +452,32 @@ class BookingViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated(), IsSuperAdmin()]
         return [IsAuthenticated()]
 
+    def destroy(self, request, *args, **kwargs):
+        # Un rendez-vous validé (PAYE) ne peut jamais être supprimé, même par le
+        # super admin : sa suppression fausserait les statistiques de revenus.
+        booking = self.get_object()
+        if booking.status == BookingStatus.PAYE:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied(
+                "Un rendez-vous validé ne peut pas être supprimé."
+            )
+        return super().destroy(request, *args, **kwargs)
+
     def partial_update(self, request, *args, **kwargs):
+        from rest_framework.exceptions import PermissionDenied
+
+        # Un rendez-vous validé (PAYE) est définitif : il ne peut plus être
+        # modifié ni annulé par personne (client, assistant ou super admin),
+        # afin de préserver l'intégrité des statistiques de revenus.
+        booking = self.get_object()
+        if booking.status != BookingStatus.EN_ATTENTE:
+            raise PermissionDenied(
+                "Ce rendez-vous est déjà validé ou annulé : il ne peut plus être modifié."
+            )
+
         # Assistants (ADMIN role) cannot set status to ANNULE — only super admin can cancel.
         new_status = request.data.get("status")
         if new_status == BookingStatus.ANNULE and getattr(request.user, "role", None) == UserRole.ADMIN:
-            from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Seul le super admin peut annuler une réservation.")
         return super().partial_update(request, *args, **kwargs)
 
@@ -448,7 +554,7 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         opening_time, closing_time = _establishment_hours(establishment)
 
-        max_duration = _minutes(closing_time) - _minutes(opening_time)
+        max_duration = _closing_minutes(closing_time) - _minutes(opening_time)
         if duration > max_duration:
             raise ValidationError(
                 {"duration": f"La durée ne peut pas dépasser {max_duration} minutes (heures d'ouverture)."}
@@ -457,12 +563,15 @@ class BookingViewSet(viewsets.ModelViewSet):
         active_resources = _active_resources_count(establishment_id_int)
         slots = []
         current_start = datetime.combine(booking_date, opening_time)
-        last_start = datetime.combine(booking_date, closing_time) - timedelta(
+        last_start = _slot_window_end(booking_date, closing_time) - timedelta(
             minutes=duration
         )
 
         while current_start <= last_start:
             current_end = current_start + timedelta(minutes=duration)
+            # Marge tampon de chaque côté du créneau candidat (voir BOOKING_BUFFER_MINUTES).
+            start_buffered = _shift_time(current_start.time(), -BOOKING_BUFFER_MINUTES)
+            end_buffered = _shift_time(current_end.time(), BOOKING_BUFFER_MINUTES)
             overlapping_count = (
                 Booking.objects.filter(
                     resource__establishment_id=establishment_id_int,
@@ -471,7 +580,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 )
                 .exclude(status=BookingStatus.ANNULE)
                 .filter(
-                    start_time__lt=current_end.time(), end_time__gt=current_start.time()
+                    start_time__lt=end_buffered, end_time__gt=start_buffered
                 )
                 .values("resource_id")
                 .distinct()
@@ -491,9 +600,10 @@ class BookingViewSet(viewsets.ModelViewSet):
                     "color": "red" if is_full else "green",
                 }
             )
-            # Keep a fixed 15-minute start grid so different booking durations
-            # (15/30/45/60) can coexist consistently across one or many machines.
-            current_start += timedelta(minutes=DEFAULT_SLOT_STEP_MINUTES)
+            # Espace chaque créneau proposé de la durée + marge tampon, afin de
+            # laisser le temps de récupérer le linge avant le créneau suivant.
+            # Ex. 15 min + 5 min : 19:00-19:15, 19:20-19:35, 19:40-19:55, ...
+            current_start += timedelta(minutes=duration + BOOKING_BUFFER_MINUTES)
 
         return Response(
             {
@@ -550,7 +660,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             raise ValidationError({"establishment_id": "Établissement introuvable."}) from exc
 
         opening_time, closing_time = _establishment_hours(establishment)
-        max_duration = _minutes(closing_time) - _minutes(opening_time)
+        max_duration = _closing_minutes(closing_time) - _minutes(opening_time)
         if duration > max_duration:
             raise ValidationError(
                 {"duration": f"La durée ne peut pas dépasser {max_duration} minutes (heures d'ouverture)."}
@@ -582,7 +692,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             date_key = current_date.isoformat()
             slots = []
             current_start = datetime.combine(current_date, opening_time)
-            last_start = datetime.combine(current_date, closing_time) - timedelta(
+            last_start = _slot_window_end(current_date, closing_time) - timedelta(
                 minutes=duration
             )
 
@@ -591,13 +701,16 @@ class BookingViewSet(viewsets.ModelViewSet):
             # For each slot, count distinct resources that overlap
             while current_start <= last_start:
                 current_end = current_start + timedelta(minutes=duration)
+                # Marge tampon de chaque côté du créneau candidat (voir BOOKING_BUFFER_MINUTES).
+                cand_start = current_start - timedelta(minutes=BOOKING_BUFFER_MINUTES)
+                cand_end = current_end + timedelta(minutes=BOOKING_BUFFER_MINUTES)
 
                 overlapping_resources = set()
                 for b in day_bookings:
                     # b[start_time]/[end_time] are time objects
                     b_start = datetime.combine(current_date, b["start_time"])
                     b_end = datetime.combine(current_date, b["end_time"])
-                    if b_start < current_end and b_end > current_start:
+                    if b_start < cand_end and b_end > cand_start:
                         overlapping_resources.add(b["resource_id"])
 
                 overlapping_count = len(overlapping_resources)
@@ -618,7 +731,8 @@ class BookingViewSet(viewsets.ModelViewSet):
                     }
                 )
 
-                current_start += timedelta(minutes=DEFAULT_SLOT_STEP_MINUTES)
+                # Même espacement (durée + marge) que /available-slots.
+                current_start += timedelta(minutes=duration + BOOKING_BUFFER_MINUTES)
 
             results[date_key] = {
                 "date": current_date,
@@ -665,6 +779,24 @@ class BookingViewSet(viewsets.ModelViewSet):
         ):
             raise ValidationError(
                 {"resource": "Un ADMIN ne peut réserver que dans son établissement."}
+            )
+
+        # Anti-spam : un client ne peut avoir qu'une seule réservation EN_ATTENTE à la fois.
+        new_status = serializer.validated_data.get("status", BookingStatus.EN_ATTENTE)
+        booking_user = serializer.validated_data.get("user")
+        if (
+            self.request.user.role == UserRole.CUSTOMER
+            and new_status == BookingStatus.EN_ATTENTE
+            and booking_user is not None
+            and Booking.objects.filter(
+                user=booking_user, status=BookingStatus.EN_ATTENTE
+            ).exists()
+        ):
+            raise ValidationError(
+                {
+                    "code": ErrorCode.BOOKING_PENDING_LIMIT,
+                    "detail": "Vous ne pouvez pas prendre un autre rendez-vous : vous avez déjà une réservation en attente. Veuillez contacter un assistant.",
+                }
             )
 
         booking = serializer.save(
@@ -792,6 +924,8 @@ class SuperAdminHistoryAPIView(APIView):
     authentication_classes = [ChronoJWTAuthentication]
 
     def get(self, request):
+        # On classe par date d'événement réelle (validation si elle existe,
+        # sinon création) en ordre décroissant : les plus récents en haut.
         queryset = (
             Booking.objects.select_related(
                 "user",
@@ -800,7 +934,8 @@ class SuperAdminHistoryAPIView(APIView):
                 "resource__establishment",
             )
             .all()
-            .order_by("-validated_at", "-created_at")
+            .annotate(event_at=Coalesce("validated_at", "created_at"))
+            .order_by("-event_at", "-created_at")
         )
 
         establishment_id = request.query_params.get("establishment_id")
@@ -935,7 +1070,7 @@ class SuperAdminStatsAPIView(APIView):
         for day_offset in range(WEEKDAY_COUNT):
             current_day = week_start + timedelta(days=day_offset)
             current_start = datetime.combine(current_day, opening_time)
-            last_start = datetime.combine(current_day, closing_time) - timedelta(
+            last_start = _slot_window_end(current_day, closing_time) - timedelta(
                 minutes=DEFAULT_SLOT_STEP_MINUTES
             )
 

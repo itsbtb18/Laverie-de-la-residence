@@ -479,6 +479,7 @@ export function AdminAssistantPage({
       try {
         const normalizedSearch = normalizeClientSearchQuery(searchClientQuery);
         const params = new URLSearchParams({ role: "CUSTOMER" });
+        params.set("establishment_id", String(estId));
         if (normalizedSearch) {
           params.set("search", normalizedSearch);
         }
@@ -520,7 +521,7 @@ export function AdminAssistantPage({
       active = false;
       clearTimeout(timer);
     };
-  }, [searchClientQuery, activeTab, refreshCounter, isTicketRoute, t]);
+  }, [searchClientQuery, activeTab, refreshCounter, isTicketRoute, estId, t]);
 
   // Manual Booking client search effect
   useEffect(() => {
@@ -535,6 +536,7 @@ export function AdminAssistantPage({
       try {
         const normalizedSearch = normalizeClientSearchQuery(searchClientForBooking);
         const params = new URLSearchParams({ role: "CUSTOMER" });
+        params.set("establishment_id", String(estId));
         if (normalizedSearch) {
           params.set("search", normalizedSearch);
         }
@@ -556,7 +558,7 @@ export function AdminAssistantPage({
       active = false;
       clearTimeout(timer);
     };
-  }, [searchClientForBooking, selectedSlotForBooking]);
+  }, [searchClientForBooking, selectedSlotForBooking, estId]);
 
   // Validation search: CRN-* → bookings only; else → clients (name / phone)
   useEffect(() => {
@@ -596,7 +598,7 @@ export function AdminAssistantPage({
           setFoundBookings([]);
           const normalized = normalizeClientSearchQuery(raw);
           const res = await fetch(
-            `/api/users/?search=${encodeURIComponent(normalized)}&role=CUSTOMER`,
+            `/api/users/?search=${encodeURIComponent(normalized)}&role=CUSTOMER&establishment_id=${estId}`,
             { headers: authHeader() }
           );
           if (res.ok && active) {
@@ -615,7 +617,7 @@ export function AdminAssistantPage({
       active = false;
       clearTimeout(timer);
     };
-  }, [searchBookingQuery, activeTab, isTicketRoute]);
+  }, [searchBookingQuery, activeTab, isTicketRoute, estId]);
 
   useEffect(() => {
     if (activeTab !== "validation") return;
@@ -977,6 +979,7 @@ export function AdminAssistantPage({
           last_name: quickLastName.trim(),
           secret_code: secret,
           role: "CUSTOMER",
+          establishment: estId,
           created_in_person: true,
         }),
       });
@@ -1036,6 +1039,7 @@ export function AdminAssistantPage({
           phone: normalizePhoneInput(payload.phoneNumber),
           secret_code: payload.secretCode.trim(),
           role: "CUSTOMER",
+          establishment: estId,
           created_in_person: true,
         }),
       });
@@ -1256,8 +1260,6 @@ export function AdminAssistantPage({
           setSelectedBookingDetails((prev) => (prev ? { ...prev, status: "PAYE" } : null));
         }
         triggerRefresh();
-        // Print receipt
-        handlePrintReceipt(bookingId);
       } else {
         showError("Impossible de valider.");
       }
